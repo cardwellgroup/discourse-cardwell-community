@@ -79,9 +79,20 @@ Settings):
 A change applies to every web worker and Sidekiq without a restart.
 `AssetProcessor.timeout` is per process and Discourse fires `site_setting_changed`
 only in the process that saved, so the saving process applies the new limit and
-publishes it on a MessageBus channel, every live process applies it on receipt,
-and a process forked later (a respawned worker) re-reads the channel's last
-message in its fork hook rather than trusting the boot-time value it inherited.
+publishes it on a MessageBus channel, and every live process applies it on
+receipt. A process forked later inherited the boot-time value, so its fork hook
+re-reads: Sidekiq from the settings (fresh by the time its hook fires), a web
+worker from the channel's last message (its hook fires before
+`SiteSetting.after_fork`, so its settings are still the mold's copy). Boot also
+publishes the database's value, so after any restart the channel is the truth,
+and the message is published with a ten-year backlog age so a worker respawned
+weeks later still finds it. An in-place backup restore flushes Redis and swaps
+the database without firing a setting change, so the plugin rebroadcasts on
+Discourse's `site_settings_restored` event. What remains: anything that loses or
+skips the channel's latest message between boot and a web worker's respawn (a
+Redis flush by hand, Redis restarted from an older snapshot, a broadcast that
+failed and was logged) leaves that worker on an older value until the next
+change or restart.
 
 ## Install
 
@@ -109,8 +120,17 @@ run this plugin's specs against it (CI runs them on every push against core's
   methods. If any is missing the plugin logs a warning at boot and leaves core's
   limit in place; any other error while setting the limit is logged, never
   raised. The specs additionally pin `AssetProcessor.reset_context` (called by
-  core's setter). The 30 s worker timeout behind the setting's maximum is not
-  tested; re-read `config/pitchfork.conf.rb` by hand.
+  core's setter). Not guarded, so check by hand: the event names
+  `:web_fork_started`, `:sidekiq_fork_started` (both fired from
+  `config/pitchfork.conf.rb`) and `:site_settings_restored`
+  (`lib/backup_restore/restorer.rb`). A renamed event fails silently: forks
+  keep the boot-time value, and a restored value is neither applied nor put back
+  on the channel until the next change or restart. Also the fork events' order
+  relative to `Discourse.after_fork`
+  (web before it, in `pitchfork.conf.rb`; Sidekiq after it, in
+  `lib/demon/base.rb`), `MessageBus.last_message` and `publish`'s
+  `max_backlog_age` option, and the 30 s production worker timeout behind the
+  setting's maximum.
 
 ## Development
 

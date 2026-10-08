@@ -16,7 +16,9 @@ end
 require_relative "lib/cardwell_community/compile_timeout"
 
 after_initialize do
-  CardwellCommunity::CompileTimeout.apply!
+  # Apply here and put the database's value on the channel, so that forks
+  # after any restart read the truth and not a broadcast from before it.
+  CardwellCommunity::CompileTimeout.broadcast!
 
   # Other live processes apply the broadcast; see the module comment for why a
   # setting change cannot reach them any other way.
@@ -36,9 +38,14 @@ after_initialize do
   # missed the broadcast. These must run whatever the enabled flag says: the
   # last broadcast may be the one that turned the plugin off, and the web hook
   # fires before SiteSetting.after_fork, so `enabled?` there reads the mold's
-  # stale copy. That rules out the plugin's `on` wrapper.
+  # stale copy. That rules out the plugin's `on` wrapper. Sidekiq's hook fires
+  # after Discourse.after_fork, so its settings are fresh and it re-reads them.
+  # An in-place backup restore flushes Redis (the channel with it), swaps the
+  # database and refreshes settings without firing :site_setting_changed, so
+  # the restored value has to be applied and put back on the channel by hand.
   # rubocop:disable Discourse/Plugins/UsePluginInstanceOn
   DiscourseEvent.on(:web_fork_started) { CardwellCommunity::CompileTimeout.resync! }
-  DiscourseEvent.on(:sidekiq_fork_started) { CardwellCommunity::CompileTimeout.resync! }
+  DiscourseEvent.on(:sidekiq_fork_started) { CardwellCommunity::CompileTimeout.apply! }
+  DiscourseEvent.on(:site_settings_restored) { CardwellCommunity::CompileTimeout.broadcast! }
   # rubocop:enable Discourse/Plugins/UsePluginInstanceOn
 end

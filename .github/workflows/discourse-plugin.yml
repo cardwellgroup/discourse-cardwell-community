@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+# The shared workflow only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   ci:
     uses: discourse/.github/.github/workflows/discourse-plugin.yml@v1
