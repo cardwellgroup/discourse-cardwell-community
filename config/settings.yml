@@ -1,0 +1,8 @@
+discourse_cardwell_community:
+  cardwell_community_enabled:
+    default: true
+    client: false
+  cardwell_theme_compile_timeout_seconds:
+    default: 24
+    min: 15
+    max: 25
