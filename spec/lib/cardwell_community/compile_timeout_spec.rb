@@ -14,12 +14,18 @@ RSpec.describe CardwellCommunity::CompileTimeout do
 
   # Keep this plugin's broadcasts off the in-memory bus. The plugin's own
   # subscriber from after_initialize runs on another thread, and a delivery
-  # landing in a later example would change the value under it. An example
-  # that stubs publish itself opts out so the two stubs cannot interact.
+  # landing in a later example would change the value under it. Core's own
+  # publishes during a setting save go through. A plain Ruby check rather than
+  # an argument matcher: Discourse's spec/support/mocks.rb includes Mocha::API
+  # into every example after rspec-mocks, so Mocha's `anything`, `kind_of` and
+  # `instance_of` shadow rspec's, and a Mocha matcher has no `===`, so rspec's
+  # `with` never matches it (`any_args` has no Mocha twin and is safe). An
+  # example that stubs publish itself opts out so the two stubs cannot interact.
   before do |example|
     next if example.metadata[:stubs_publish]
-    allow(MessageBus).to receive(:publish).and_call_original
-    allow(MessageBus).to receive(:publish).with(described_class::CHANNEL, anything, anything)
+    allow(MessageBus).to receive(:publish).and_wrap_original do |original, channel, *rest|
+      original.call(channel, *rest) unless channel == described_class::CHANNEL
+    end
   end
 
   it "records core's default before changing it" do
@@ -34,6 +40,9 @@ RSpec.describe CardwellCommunity::CompileTimeout do
     described_class.apply!
 
     expect(AssetProcessor.timeout).to eq(20_000)
+    # The save above called broadcast! exactly once; apply! calling it too
+    # would make that two.
+    expect(described_class).to have_received(:broadcast!).once
     expect(MessageBus).not_to have_received(:publish).with(described_class::CHANNEL, any_args)
   end
 
@@ -96,7 +105,7 @@ RSpec.describe CardwellCommunity::CompileTimeout do
     expect(MessageBus).to have_received(:publish).with(
       described_class::CHANNEL,
       { "ms" => 15_000 },
-      anything,
+      max_backlog_age: described_class::BACKLOG_AGE_SECONDS,
     )
   end
 
