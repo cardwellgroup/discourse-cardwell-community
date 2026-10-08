@@ -1,0 +1,4 @@
+en:
+  site_settings:
+    cardwell_community_enabled: "Turn on the Cardwell community plugin. Off restores Discourse's defaults for every part, with no rebuild."
+    cardwell_theme_compile_timeout_seconds: "How long Discourse may spend compiling a theme's JavaScript before giving up. Discourse allows 15 seconds. The web worker ends any request at 30 seconds and a theme update spends about 5 of them outside the compile, so 24 leaves a margin and 25 leaves none. Runs on theme updates and on the first request after an upgrade, not on ordinary page views."

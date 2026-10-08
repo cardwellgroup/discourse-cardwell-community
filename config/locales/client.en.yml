@@ -1,0 +1,6 @@
+en:
+  admin_js:
+    admin:
+      site_settings:
+        categories:
+          discourse_cardwell_community: "Cardwell community"
