@@ -25,6 +25,7 @@ after_initialize do
   end
 
   require_relative "lib/cardwell_community/initials_avatars_controller"
+  CardwellCommunity::InitialsAvatars.cleanup_old
 
   # Under /letter_avatar/ so nginx caches it like core's letter avatars; see
   # InitialsAvatars for why the four segments can't collide with core's route.

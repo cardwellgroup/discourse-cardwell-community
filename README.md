@@ -119,26 +119,34 @@ per-person color core already gives them. Photos are never touched.
   `discourse-fonts` gem core ships), in core's color. A single letter stands as
   tall as that service's (157 px on a 360 px tile, 215 pt). Every pair is one
   size, 150 pt, chosen so the widest pair ("WW") stays inside the circle the theme
-  crops avatars to. Each tile is drawn once per initials, color and size, and kept
-  under `tmp/cardwell_initials_avatars/`. Sizes are rounded up to `avatar_sizes`,
-  the list browsers ask from, so a request can't make the server keep a file for
-  every size. Measured on the droplet: about 0.4 s for
-  a first draw, 2 ms after.
-- **Cached by nginx.** The URL is
+  crops avatars to. If the font file moves, it draws in Helvetica and logs a
+  warning; Inter has no CJK or Arabic glyphs, so names in those scripts would draw
+  as boxes. Measured on the droplet: about 0.3 s for a first draw, 2 ms after.
+- **What's kept on disk.** Members' tiles, once per initials, color and size,
+  under `tmp/cardwell_initials_avatars/{version}/{font}/`. Sizes are rounded up to
+  `avatar_sizes`, the list browsers ask from. Boot clears other versions, like
+  core's `LetterAvatar.cleanup_old`.
+- **Cached by nginx, a day at most.** The URL is
   `/letter_avatar/cardwell/{username}/{color}/{size}.png`. The container's nginx
-  caches the `/letter_avatar/` prefix, so after the first view an avatar never
-  reaches the web workers, as core's letters don't. Core's own route under that
-  prefix takes three segments, so this four-segment one can't collide with it.
-  Browsers and nginx keep an avatar for a day: a renamed username is a new URL and
-  shows at once, and a name edit that keeps the username shows within a day.
+  caches the `/letter_avatar/` prefix, so while it holds an avatar the request
+  never reaches the web workers, as core's letters don't. Core's own route under
+  that prefix takes three segments, so this four-segment one can't collide with
+  it. nginx keeps an avatar for 12 hours (`X-Accel-Expires`, which it doesn't pass
+  on) and browsers for 12 (`Cache-Control`), so a name edit that keeps the
+  username shows within a day, decision 9's rule. A renamed username is a new URL
+  and shows at once.
 - **Signed out on purpose.** Email clients fetch avatars with no session, so the
   route answers anyone, like core's. A username with no account gets initials from
-  the username split on dots, dashes and underscores (`john.smith` → JS), so a
-  guessed username shows the same image whether or not that person is a member.
-  The color always comes from the username, never the URL, so a request can't make
-  the server draw tiles in arbitrary colors. Only letters and digits are drawn
-  (anything else becomes "?"), since ImageMagick reads text starting with `@` as a
-  file name.
+  the username split on dots, dashes and underscores (`john.smith` → JS), so when a
+  member's name matches the firstname.lastname username the sync gives them, a
+  guessed username shows the same image whether or not that person is a member. A
+  member whose name doesn't match the username (or who has no name) shows
+  differently.
+- **Strangers can't fill the disk.** A username with no account can be anything,
+  so its tile is drawn into a temporary directory, sent and thrown away, and those
+  draws are limited to 30 per IP per minute. The color always comes from the
+  username, never the URL. Only letters and digits are drawn (anything else
+  becomes "?"), since ImageMagick reads text starting with `@` as a file name.
 - **Old quotes keep their URL.** A quote cooked into a post keeps the avatar URL
   it was cooked with. The route serves whether or not the part is on, so those
   images keep loading; a rebake picks up the current URL.

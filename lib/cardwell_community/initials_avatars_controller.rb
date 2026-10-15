@@ -24,13 +24,24 @@ module CardwellCommunity
       username = params.require(:username).to_s
       size = params.require(:size).to_i
 
-      hijack do
-        image = InitialsAvatars.image_for(username, size)
+      # Before the hijack, so an over-limit request gets the usual 429.
+      if InitialsAvatars.find_member(username).nil?
+        RateLimiter.new(
+          nil,
+          "cardwell_initials_avatar_#{request.remote_ip}",
+          InitialsAvatars::STRANGER_DRAWS_PER_MINUTE,
+          1.minute,
+        ).performed!
+      end
 
-        response.headers["Last-Modified"] = File.ctime(image).httpdate
-        response.headers["Content-Length"] = File.size(image).to_s
-        expires_in InitialsAvatars::MAX_AGE, public: true
-        send_file image, disposition: nil
+      hijack do
+        InitialsAvatars.with_image(username, size) do |image|
+          response.headers["Last-Modified"] = File.ctime(image).httpdate
+          response.headers["X-Accel-Expires"] = InitialsAvatars::NGINX_MAX_AGE.to_i.to_s
+          expires_in InitialsAvatars::BROWSER_MAX_AGE, public: true
+          # Read now: a stranger's tile is deleted when the block returns.
+          send_data File.binread(image), type: "image/png", disposition: "inline"
+        end
       end
     end
   end

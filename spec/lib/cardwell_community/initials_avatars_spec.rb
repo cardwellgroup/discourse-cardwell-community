@@ -82,33 +82,56 @@ RSpec.describe CardwellCommunity::InitialsAvatars do
 
     it "leaves uploaded photos alone" do
       user = Fabricate(:user, username: "with.photo")
+      expect(user.avatar_template).to include("/letter_avatar/cardwell/")
+
       user.update!(uploaded_avatar: Fabricate(:image_upload, user:))
 
       expect(user.avatar_template).to include("/user_avatar/")
     end
   end
 
-  describe ".image_for" do
-    let(:dir) { Dir.mktmpdir }
+  describe ".with_image" do
+    let(:root) { Dir.mktmpdir }
 
-    before { allow(described_class).to receive(:cache_dir).and_return(dir) }
-    after { FileUtils.rm_rf(dir) }
+    before { allow(described_class).to receive(:cache_root).and_return(root) }
+    after { FileUtils.rm_rf(root) }
 
-    it "draws a PNG at the requested size and reuses it" do
+    def size_of(username, size)
+      described_class.with_image(username, size) { |image| FastImage.size(image) }
+    end
+
+    it "draws a member's PNG at the requested size and keeps it" do
       Fabricate(:user, username: "dana.whitfield", name: "Dana Whitfield")
 
-      image = described_class.image_for("dana.whitfield", 48)
+      first = described_class.with_image("dana.whitfield", 48) { |image| image }
 
-      expect(File.extname(image)).to eq(".png")
-      expect(FastImage.size(image)).to eq([48, 48])
-      expect(described_class.image_for("dana.whitfield", 48)).to eq(image)
+      expect(FastImage.size(first)).to eq([48, 48])
+      expect(first).to start_with(File.expand_path(root))
+      expect(described_class.with_image("dana.whitfield", 48) { |image| image }).to eq(first)
+    end
+
+    it "draws a stranger's tile without keeping it" do
+      kept = described_class.with_image("john.smith", 48) { |image| [image, FastImage.size(image)] }
+
+      expect(kept.last).to eq([48, 48])
+      expect(File.exist?(kept.first)).to eq(false)
+      expect(Dir.glob(File.join(root, "**", "*.png"))).to be_empty
     end
 
     it "rounds the size up to one of the avatar sizes browsers ask for" do
       SiteSetting.avatar_sizes = "24|48|96"
 
-      expect(FastImage.size(described_class.image_for("x", 45))).to eq([48, 48])
-      expect(FastImage.size(described_class.image_for("x", 5_000))).to eq([96, 96])
+      expect(size_of("x", 45)).to eq([48, 48])
+      expect(size_of("x", 5_000)).to eq([96, 96])
+    end
+
+    it "clears tiles from older versions" do
+      old = File.join(root, "0", "intervariable")
+      FileUtils.mkdir_p(old)
+
+      described_class.cleanup_old
+
+      expect(Dir.exist?(old)).to eq(false)
     end
   end
 end
