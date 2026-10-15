@@ -15,11 +15,28 @@ end
 
 require_relative "lib/cardwell_community/compile_timeout"
 require_relative "lib/cardwell_community/lucide_icon_pickers"
+require_relative "lib/cardwell_community/initials_avatars"
 
 after_initialize do
   reloadable_patch do
     SvgSprite.singleton_class.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteExtension)
     SvgSpriteController.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteControllerExtension)
+    User.singleton_class.prepend(CardwellCommunity::InitialsAvatars::UserExtension)
+  end
+
+  require_relative "lib/cardwell_community/initials_avatars_controller"
+
+  # Under /letter_avatar/ so nginx caches it like core's letter avatars; see
+  # InitialsAvatars for why the four segments can't collide with core's route.
+  Discourse::Application.routes.append do
+    get "letter_avatar/cardwell/:username/:color/:size.png" =>
+          "cardwell_community/initials_avatars#show",
+        :constraints => {
+          username: RouteFormat.username,
+          color: /\h{6}/,
+          size: /\d+/,
+          format: :png,
+        }
   end
 
   # Apply here and put the database's value on the channel, so that forks

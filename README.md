@@ -26,8 +26,8 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 8 | Message membership facts on the server | Planned, [306-534](https://linear.app/cardwell/issue/306-534) |
 | 8a | Tell the theme when moderators can read a message | Planned, [306-612](https://linear.app/cardwell/issue/306-612) |
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
-| 10 | Letter avatars show initials from the name | Planned, [306-587](https://linear.app/cardwell/issue/306-587) |
-| 11 | Lucide-only icon pickers | In review, [306-609](https://linear.app/cardwell/issue/306-609) |
+| 10 | Letter avatars show initials from the name | In review, [306-587](https://linear.app/cardwell/issue/306-587) |
+| 11 | Lucide-only icon pickers | Live, [306-609](https://linear.app/cardwell/issue/306-609) |
 
 The parent issue is [306-533](https://linear.app/cardwell/issue/306-533); the
 design home is PRD 2, _Platform approach, Cardwell community plugin_. The Linear
@@ -96,6 +96,53 @@ Redis flush by hand, Redis restarted from an older snapshot, a broadcast that
 failed and was logged) leaves that worker on an older value until the next
 change or restart.
 
+### Part 10: initials from the name in letter avatars
+
+Someone with no photo gets a letter avatar, and core's letter is the first letter
+of the **username**. The community's usernames come from the Cardwell Auth sync,
+so a member would show one letter of whatever username they were given. This part
+draws two initials from the **name** instead ("Dana Whitfield" → DW), in the
+per-person color core already gives them. Photos are never touched.
+
+- **Every surface at once.** Core hands out every letter avatar through
+  `User.system_avatar_template`: posts, lists, the header, notifications, emails,
+  the directory, profiles, user cards and the landing page. While the part is on,
+  that method returns this plugin's URL; off, it is core's again, with no setting
+  to change by hand.
+- **Initials.** The first letters of the first and last words of the name. One
+  word gives one letter. Anything after a comma ("Jane Doe, CPA") and a trailing
+  Jr, Sr, II, III, IV or V are skipped. An empty name gives the username's first
+  letter, core's rule.
+- **Drawn on this server.** Core's default letters come from Discourse's image
+  service through `/letter_avatar_proxy`. This part draws with the server's
+  ImageMagick in Helvetica, with letters as tall as that service's (157 px on a
+  360 px tile, 215 pt). A pair wider than 250 px is set smaller so it stays inside
+  the circle the theme crops avatars to. The server's ImageMagick policy blocks
+  the `label:` coder, so widths are measured with `-annotate`, the call core's
+  `LetterAvatar` makes. Each tile is drawn once per initials, color and size, and
+  kept under `tmp/cardwell_initials_avatars/`. Measured on the droplet: about 0.4 s
+  for a first draw, 2 ms after.
+- **Cached by nginx.** The URL is
+  `/letter_avatar/cardwell/{username}/{color}/{size}.png`. The container's nginx
+  caches the `/letter_avatar/` prefix, so after the first view an avatar never
+  reaches the web workers, as core's letters don't. Core's own route under that
+  prefix takes three segments, so this four-segment one can't collide with it.
+  Browsers and nginx keep an avatar for a day: a renamed username is a new URL and
+  shows at once, and a name edit that keeps the username shows within a day.
+- **Signed out on purpose.** Email clients fetch avatars with no session, so the
+  route answers anyone, like core's. A username with no account gets initials from
+  the username split on dots, dashes and underscores (`john.smith` → JS), so a
+  guessed username shows the same image whether or not that person is a member.
+  The color always comes from the username, never the URL, so a request can't make
+  the server draw tiles in arbitrary colors.
+- **Old quotes keep their URL.** A quote cooked into a post keeps the avatar URL
+  it was cooked with. The route serves whether or not the part is on, so those
+  images keep loading; a rebake picks up the current URL.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_initials_avatars_enabled` | on | Off goes back to core's username letter, with no rebuild. |
+
 ### Part 11: Lucide-only icon pickers
 
 The 306 Community theme ships every Lucide icon in its `icons-sprite`, each named
@@ -163,6 +210,12 @@ run this plugin's specs against it (CI runs them on every push against core's
   `lib/demon/base.rb`), `MessageBus.last_message` and `publish`'s
   `max_backlog_age` option, and the 30 s production worker timeout behind the
   setting's maximum.
+- Part 10 prepends to `User.system_avatar_template(username)` and draws with
+  `ImageMagick.magick`, `ImageProcessing::OutputFile.write` and
+  `OptimizedImage.resize`, all core internals. Check that core still builds every
+  letter avatar URL in `system_avatar_template`, that the container's nginx still
+  caches the `/letter_avatar/` prefix, and that core's letter route there still
+  takes three segments. The specs draw a real tile, so a renamed helper fails them.
 - Part 11 prepends to `SvgSprite.picker_icon_ids(theme_id, only_available)` and
   `SvgSpriteController#stale?`. Check that the pickers are still the only caller
   of `picker_icon_ids` (if core starts rendering from it, the filter would hide
