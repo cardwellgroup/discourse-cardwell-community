@@ -32,28 +32,35 @@ RSpec.describe CardwellCommunity::InitialsAvatarsController do
   end
 
   context "with rate limits on" do
-    before do
-      RateLimiter.enable
-      stub_const("CardwellCommunity::InitialsAvatars::STRANGER_DRAWS_PER_MINUTE", 1)
+    before { RateLimiter.enable }
+
+    # Discourse's spec helpers replace RSpec's stub_const with a block form
+    # (target, name, value) that restores the constant when the block ends.
+    def with_one_draw_per_minute(&blk)
+      stub_const(CardwellCommunity::InitialsAvatars, :STRANGER_DRAWS_PER_MINUTE, 1, &blk)
     end
 
     it "limits draws for usernames with no account" do
-      get "/letter_avatar/cardwell/john.smith/7ba0ec/48.png"
-      expect(response.status).to eq(200)
+      with_one_draw_per_minute do
+        get "/letter_avatar/cardwell/john.smith/7ba0ec/48.png"
+        expect(response.status).to eq(200)
 
-      get "/letter_avatar/cardwell/jane.doe/7ba0ec/48.png"
-      expect(response.status).to eq(429)
+        get "/letter_avatar/cardwell/jane.doe/7ba0ec/48.png"
+        expect(response.status).to eq(429)
+      end
     end
 
     it "doesn't limit members" do
       Fabricate(:user, username: "dana.whitfield", name: "Dana Whitfield")
       Fabricate(:user, username: "pat.lee", name: "Pat Lee")
 
-      get "/letter_avatar/cardwell/dana.whitfield/7ba0ec/48.png"
-      expect(response.status).to eq(200)
+      with_one_draw_per_minute do
+        get "/letter_avatar/cardwell/dana.whitfield/7ba0ec/48.png"
+        expect(response.status).to eq(200)
 
-      get "/letter_avatar/cardwell/pat.lee/7ba0ec/48.png"
-      expect(response.status).to eq(200)
+        get "/letter_avatar/cardwell/pat.lee/7ba0ec/48.png"
+        expect(response.status).to eq(200)
+      end
     end
   end
 
