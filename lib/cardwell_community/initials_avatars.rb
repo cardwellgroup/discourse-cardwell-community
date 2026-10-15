@@ -17,7 +17,7 @@ module CardwellCommunity
   # Today's letters aren't drawn on this server: the default
   # external_system_avatars_url relays Discourse's own image service
   # (/letter_avatar_proxy → avatars.discourse-cdn.com). This part draws with
-  # the server's ImageMagick instead, in Helvetica, at the same letter height.
+  # the server's ImageMagick instead, in Inter, at the same letter height.
   #
   # The URL sits under /letter_avatar/ on purpose. The container's nginx
   # caches that prefix (proxy_cache in discourse_docker's nginx template), so
@@ -40,14 +40,20 @@ module CardwellCommunity
     # Drawn once at this size and scaled down, like core's LetterAvatar.
     FULLSIZE = 360
 
-    # Letter height matches today's letter: a "D" from Discourse's image
-    # service stands 157 px tall on a 360 px tile, which Helvetica reaches at
-    # 215 points. A pair wider than MAX_TEXT_WIDTH is set smaller, so wide
-    # pairs ("MW") stay inside the circle the theme crops avatars to.
+    # A single letter matches today's: a "D" from Discourse's image service
+    # stands 157 px tall on a 360 px tile, which Inter reaches at 215 points.
     POINTSIZE = 215
-    MAX_TEXT_WIDTH = 250
-    FONT = "Helvetica"
+
+    # Every pair is one size, so two-letter avatars look alike from person to
+    # person (Kirk, Oct 15). It's sized for the widest pair: "WW" at 150 points
+    # is 289 x 110 px, and its corners sit 155 px from the center, inside the
+    # 180 px circle the theme crops avatars to.
+    PAIR_POINTSIZE = 150
     FILL = "#FFFFFFCC"
+
+    # Inter, the community's UI font (Kirk, Oct 15), from the discourse-fonts
+    # gem core already ships; ImageMagick reads the woff2 through FreeType.
+    INTER_FILE = "InterVariable.woff2"
 
     # Credentials come after a comma ("Jane Doe, CPA") and suffixes come last
     # ("John Smith Jr."); neither belongs in initials (Kirk, Oct 15).
@@ -77,7 +83,7 @@ module CardwellCommunity
     # First letter of the first and last words; one word gives one letter.
     # Returns nil when the name has no letters at all.
     def self.initials_from_name(name)
-      words = name.to_s.split(",").first.to_s.split
+      words = name.to_s.unicode_normalize(:nfc).split(",").first.to_s.split
       words.pop while words.size > 1 && SUFFIXES.include?(words.last.downcase.delete("."))
       letters = words.filter_map { |word| word[/\p{L}/] }
       return if letters.empty?
@@ -86,23 +92,29 @@ module CardwellCommunity
     end
 
     def self.initials_from_username_parts(username)
-      letters = username.to_s.split(/[._-]+/).filter_map { |part| part[/\p{L}/] }
+      letters =
+        username.to_s.unicode_normalize(:nfc).split(/[._-]+/).filter_map { |part| part[/\p{L}/] }
       return first_letter(username) if letters.empty?
 
       (letters.size > 1 ? letters.first + letters.last : letters.first).upcase
     end
 
-    # Core's rule: the first character of the username, upper-cased.
+    # Core's rule: the first character of the username, upper-cased. Only a
+    # letter or digit is drawn: ImageMagick reads text starting with @ as a
+    # file name and % as a format escape, and the route takes any username.
     def self.first_letter(username)
-      User.normalize_username(username).to_s.grapheme_clusters.first.to_s.upcase.presence || "?"
+      letter = User.normalize_username(username).to_s.grapheme_clusters.first.to_s.upcase
+      letter.match?(/\A[\p{L}\p{N}]\p{M}*\z/) ? letter : "?"
     end
 
-    # The color comes from the username, never the URL, so a request can't
-    # make the server draw and keep a tile in an arbitrary color.
+    # The route answers anyone, so nothing in the URL may make the server draw
+    # and keep an open-ended set of files. The color comes from the username,
+    # never the URL, and the size is rounded up to one of the avatar_sizes
+    # browsers ask for (getRawAvatarSize picks from the same list).
     def self.image_for(username, size)
       initials = initials_for_username(username)
       color = User.letter_avatar_color(User.normalize_username(username))
-      size = size.clamp(8, FULLSIZE)
+      size = allowed_size(size)
 
       DistributedMutex.synchronize("cardwell_initials_avatar_#{initials}_#{color}") do
         filename = cached_path(initials, color, size)
@@ -113,6 +125,11 @@ module CardwellCommunity
         OptimizedImage.resize(fullsize, filename, size, size) if size != FULLSIZE
         filename
       end
+    end
+
+    def self.allowed_size(size)
+      sizes = Discourse.avatar_sizes.to_a.sort
+      sizes.find { |allowed| allowed >= size } || sizes.last
     end
 
     def self.cache_dir
@@ -127,11 +144,15 @@ module CardwellCommunity
       File.expand_path(File.join(dir, "#{size}.png"))
     end
 
+    # If a discourse-fonts update moves the file, Helvetica keeps avatars
+    # drawing rather than failing.
+    def self.font
+      path = File.join(DiscourseFonts.path_for_fonts, INTER_FILE)
+      File.exist?(path) ? path : "Helvetica"
+    end
+
     def self.draw(initials, color, filename)
-      pointsize = pointsize_for(initials)
-      # gravity Center centers the font's whole line box, descender included,
-      # so capitals sit low; lift them by the same share of the size.
-      lift = (pointsize * 5 / POINTSIZE.to_f).round
+      pointsize = initials.grapheme_clusters.size > 1 ? PAIR_POINTSIZE : POINTSIZE
 
       ImageProcessing::OutputFile.write(filename) do |temporary_path|
         ImageMagick.magick(
@@ -143,11 +164,13 @@ module CardwellCommunity
           "-fill",
           FILL,
           "-font",
-          FONT,
+          font,
           "-gravity",
           "Center",
+          # gravity Center puts Inter's capitals within a pixel of the middle
+          # of the tile (measured for D, DW, MW and PR), so no offset.
           "-annotate",
-          "+0-#{lift}",
+          "+0+0",
           initials,
           "-depth",
           "8",
@@ -156,39 +179,6 @@ module CardwellCommunity
           write: [temporary_path],
         )
       end
-    end
-
-    # Measured by drawing on a scratch canvas and trimming it: the server's
-    # ImageMagick policy blocks the label: coder, and -annotate is the call
-    # core's own LetterAvatar already makes.
-    def self.pointsize_for(initials)
-      return POINTSIZE if initials.length < 2
-
-      width =
-        ImageMagick.magick(
-          "-size",
-          "#{FULLSIZE * 3}x#{FULLSIZE}",
-          "xc:black",
-          "-pointsize",
-          POINTSIZE.to_s,
-          "-fill",
-          "white",
-          "-font",
-          FONT,
-          "-gravity",
-          "Center",
-          "-annotate",
-          "+0+0",
-          initials,
-          "-trim",
-          "-format",
-          "%w",
-          "info:",
-          operation: :cardwell_initials_avatar_measure,
-        ).to_i
-      return POINTSIZE if width <= MAX_TEXT_WIDTH
-
-      (POINTSIZE * MAX_TEXT_WIDTH / width.to_f).floor
     end
 
     module UserExtension

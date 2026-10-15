@@ -113,15 +113,17 @@ per-person color core already gives them. Photos are never touched.
   word gives one letter. Anything after a comma ("Jane Doe, CPA") and a trailing
   Jr, Sr, II, III, IV or V are skipped. An empty name gives the username's first
   letter, core's rule.
-- **Drawn on this server.** Core's default letters come from Discourse's image
-  service through `/letter_avatar_proxy`. This part draws with the server's
-  ImageMagick in Helvetica, with letters as tall as that service's (157 px on a
-  360 px tile, 215 pt). A pair wider than 250 px is set smaller so it stays inside
-  the circle the theme crops avatars to. The server's ImageMagick policy blocks
-  the `label:` coder, so widths are measured with `-annotate`, the call core's
-  `LetterAvatar` makes. Each tile is drawn once per initials, color and size, and
-  kept under `tmp/cardwell_initials_avatars/`. Measured on the droplet: about 0.4 s
-  for a first draw, 2 ms after.
+- **Drawn on this server, in Inter.** Core's default letters come from
+  Discourse's image service through `/letter_avatar_proxy`. This part draws with
+  the server's ImageMagick in Inter (the community's UI font, from the
+  `discourse-fonts` gem core ships), in core's color. A single letter stands as
+  tall as that service's (157 px on a 360 px tile, 215 pt). Every pair is one
+  size, 150 pt, chosen so the widest pair ("WW") stays inside the circle the theme
+  crops avatars to. Each tile is drawn once per initials, color and size, and kept
+  under `tmp/cardwell_initials_avatars/`. Sizes are rounded up to `avatar_sizes`,
+  the list browsers ask from, so a request can't make the server keep a file for
+  every size. Measured on the droplet: about 0.4 s for
+  a first draw, 2 ms after.
 - **Cached by nginx.** The URL is
   `/letter_avatar/cardwell/{username}/{color}/{size}.png`. The container's nginx
   caches the `/letter_avatar/` prefix, so after the first view an avatar never
@@ -134,7 +136,9 @@ per-person color core already gives them. Photos are never touched.
   the username split on dots, dashes and underscores (`john.smith` → JS), so a
   guessed username shows the same image whether or not that person is a member.
   The color always comes from the username, never the URL, so a request can't make
-  the server draw tiles in arbitrary colors.
+  the server draw tiles in arbitrary colors. Only letters and digits are drawn
+  (anything else becomes "?"), since ImageMagick reads text starting with `@` as a
+  file name.
 - **Old quotes keep their URL.** A quote cooked into a post keeps the avatar URL
   it was cooked with. The route serves whether or not the part is on, so those
   images keep loading; a rebake picks up the current URL.
@@ -212,7 +216,8 @@ run this plugin's specs against it (CI runs them on every push against core's
   setting's maximum.
 - Part 10 prepends to `User.system_avatar_template(username)` and draws with
   `ImageMagick.magick`, `ImageProcessing::OutputFile.write` and
-  `OptimizedImage.resize`, all core internals. Check that core still builds every
+  `OptimizedImage.resize`, all core internals, and reads Inter from the
+  `discourse-fonts` gem (Helvetica if the file moves). Check that core still builds every
   letter avatar URL in `system_avatar_template`, that the container's nginx still
   caches the `/letter_avatar/` prefix, and that core's letter route there still
   takes three segments. The specs draw a real tile, so a renamed helper fails them.

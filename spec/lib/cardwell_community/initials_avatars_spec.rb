@@ -22,6 +22,10 @@ RSpec.describe CardwellCommunity::InitialsAvatars do
       expect(described_class.initials_from_name("V")).to eq("V")
     end
 
+    it "keeps an accent stored as a separate mark" do
+      expect(described_class.initials_from_name("Jose\u0301 A\u0301lvarez")).to eq("JÁ")
+    end
+
     it "returns nil for a name with no letters" do
       expect(described_class.initials_from_name("  ")).to be_nil
       expect(described_class.initials_from_name(nil)).to be_nil
@@ -44,6 +48,12 @@ RSpec.describe CardwellCommunity::InitialsAvatars do
     it "takes initials from the parts of a username with no account" do
       expect(described_class.initials_for_username("john.smith")).to eq("JS")
       expect(described_class.initials_for_username("john_q-smith")).to eq("JS")
+    end
+
+    # ImageMagick reads text starting with @ as a file name.
+    it "draws a question mark for a username with no letter or digit" do
+      expect(described_class.initials_for_username("@")).to eq("?")
+      expect(described_class.initials_for_username("%")).to eq("?")
     end
   end
 
@@ -94,8 +104,11 @@ RSpec.describe CardwellCommunity::InitialsAvatars do
       expect(described_class.image_for("dana.whitfield", 48)).to eq(image)
     end
 
-    it "keeps the size inside core's limits" do
-      expect(FastImage.size(described_class.image_for("x", 5_000))).to eq([360, 360])
+    it "rounds the size up to one of the avatar sizes browsers ask for" do
+      SiteSetting.avatar_sizes = "24|48|96"
+
+      expect(FastImage.size(described_class.image_for("x", 45))).to eq([48, 48])
+      expect(FastImage.size(described_class.image_for("x", 5_000))).to eq([96, 96])
     end
   end
 end
