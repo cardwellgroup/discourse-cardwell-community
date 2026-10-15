@@ -29,8 +29,11 @@ module CardwellCommunity
     CODES = (USER_CODES + GROUP_CODES).freeze
     PRELOAD_KEY = :cardwell_action_code_who_names
 
+    # enable_names is core's switch for showing names at all; with it off,
+    # names stay off here too.
     def self.enabled?
-      SiteSetting.cardwell_community_enabled && SiteSetting.cardwell_message_names_enabled
+      SiteSetting.cardwell_community_enabled && SiteSetting.cardwell_message_names_enabled &&
+        SiteSetting.enable_names
     end
 
     # { [code, who] => display name } for the pairs that have one. Users by
@@ -65,18 +68,18 @@ module CardwellCommunity
     end
 
     # Runs once per TopicView: the handles on this page's notices, with their
-    # names, stored by post id for PostSerializer.
+    # names, stored by post id for PostSerializer. The handles come from the
+    # custom fields TopicView has already loaded for the page (action_code_who
+    # is one of its default fields); without them the serializer has no handle
+    # either, so there's nothing to name.
     def self.preload(topic_view)
       return if !enabled?
 
       posts = topic_view.posts.select { |post| CODES.include?(post.action_code) }
-      return if posts.empty?
+      custom_fields = topic_view.post_custom_fields
+      return if posts.empty? || custom_fields.blank?
 
-      whos =
-        PostCustomField
-          .where(post_id: posts.map(&:id), name: "action_code_who")
-          .pluck(:post_id, :value)
-          .to_h
+      whos = posts.to_h { |post| [post.id, custom_fields.dig(post.id, "action_code_who")] }.compact
       pairs = posts.filter_map { |post| [post.action_code, whos[post.id]] if whos[post.id] }
       names = names_for(pairs, topic_view.guardian)
 
@@ -86,8 +89,9 @@ module CardwellCommunity
       )
     end
 
-    # A post outside a TopicView (a single post, a new one over MessageBus)
-    # looks its one name up.
+    # A post serialized outside a TopicView (/posts/:id.json, for one) and an
+    # activity row look their one name up. New posts reach an open topic
+    # through /t/:id/posts.json, which is a TopicView, so they're batched.
     def self.name_for(code, who, guardian, topic_view: nil, post_id: nil)
       return if !enabled? || !CODES.include?(code) || who.blank?
 

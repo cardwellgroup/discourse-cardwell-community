@@ -71,6 +71,12 @@ RSpec.describe CardwellCommunity::MessageNames do
       expect(described_class.name_for("invited_user", "pat.lee", guardian)).to be_nil
     end
 
+    it "sends nothing when the site hides names" do
+      SiteSetting.enable_names = false
+
+      expect(notice_json).not_to have_key(:action_code_who_name)
+    end
+
     it "sends nothing when the part is off" do
       SiteSetting.cardwell_message_names_enabled = false
 

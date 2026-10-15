@@ -12,3 +12,4 @@ discourse_cardwell_community:
     default: true
   cardwell_message_names_enabled:
     default: true
+    client: true

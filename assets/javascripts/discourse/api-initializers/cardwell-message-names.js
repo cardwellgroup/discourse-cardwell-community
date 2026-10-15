@@ -27,6 +27,8 @@ function swapLinkText(html, handle, name) {
 }
 
 export default apiInitializer((api) => {
+  const siteSettings = api.container.lookup("service:site-settings");
+
   // 1. The notice's hidden heading, read aloud before the row: core builds it
   // from "@handle" in small-action.gjs.
   api.modifyClass(
@@ -73,8 +75,12 @@ export default apiInitializer((api) => {
         @action
         popup(message) {
           super.popup(message);
+          // Only when the part could send names: otherwise the second
+          // request would come back without them.
           if (
             message?.id === "user-not-seen" &&
+            siteSettings.cardwell_message_names_enabled &&
+            siteSettings.enable_names &&
             this.messages.includes(message)
           ) {
             this.cardwellNameNotSeen(message);
