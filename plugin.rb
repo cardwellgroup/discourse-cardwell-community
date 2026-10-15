@@ -14,8 +14,14 @@ module ::CardwellCommunity
 end
 
 require_relative "lib/cardwell_community/compile_timeout"
+require_relative "lib/cardwell_community/lucide_icon_pickers"
 
 after_initialize do
+  reloadable_patch do
+    SvgSprite.singleton_class.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteExtension)
+    SvgSpriteController.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteControllerExtension)
+  end
+
   # Apply here and put the database's value on the channel, so that forks
   # after any restart read the truth and not a broadcast from before it.
   CardwellCommunity::CompileTimeout.broadcast!

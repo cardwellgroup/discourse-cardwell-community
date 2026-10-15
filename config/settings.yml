@@ -6,3 +6,5 @@ discourse_cardwell_community:
     default: 24
     min: 15
     max: 25
+  cardwell_lucide_icon_pickers_enabled:
+    default: true

@@ -15,7 +15,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 
 | Part | What | Status |
 | -- | -- | -- |
-| 0 | Theme JavaScript compile limit (`AssetProcessor.timeout`), 15 s → configurable | In review, [306-565](https://linear.app/cardwell/issue/306-565) |
+| 0 | Theme JavaScript compile limit (`AssetProcessor.timeout`), 15 s → configurable | Live, [306-565](https://linear.app/cardwell/issue/306-565) |
 | 1 | Names in message history notices | Planned, [306-535](https://linear.app/cardwell/issue/306-535) |
 | 2 | Hide paused, revoked and departed members' profiles | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 3 | Visit source for the week-two return metric | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
@@ -24,8 +24,10 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 6 | A private message's own "no access" page | Planned, [306-538](https://linear.app/cardwell/issue/306-538) |
 | 7 | Directory moderation checks on the server | Planned, [306-528](https://linear.app/cardwell/issue/306-528) |
 | 8 | Message membership facts on the server | Planned, [306-534](https://linear.app/cardwell/issue/306-534) |
+| 8a | Tell the theme when moderators can read a message | Planned, [306-612](https://linear.app/cardwell/issue/306-612) |
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
-| — | Lucide-only icon pickers | Planned, [306-447](https://linear.app/cardwell/issue/306-447) |
+| 10 | Letter avatars show initials from the name | Planned, [306-587](https://linear.app/cardwell/issue/306-587) |
+| 11 | Lucide-only icon pickers | In review, [306-609](https://linear.app/cardwell/issue/306-609) |
 
 The parent issue is [306-533](https://linear.app/cardwell/issue/306-533); the
 design home is PRD 2, _Platform approach, Cardwell community plugin_. The Linear
@@ -94,6 +96,36 @@ Redis flush by hand, Redis restarted from an older snapshot, a broadcast that
 failed and was logged) leaves that worker on an older value until the next
 change or restart.
 
+### Part 11: Lucide-only icon pickers
+
+The 306 Community theme ships every Lucide icon in its `icons-sprite`, each named
+with the `lucide-` prefix, and every category, sidebar link, badge and group flair
+on the site uses one. Discourse's icon pickers (category icon, sidebar links,
+group flair, badges) still offer core's Font Awesome set next to them, so anyone
+picking an icon could bring Font Awesome back.
+
+Every picker fills its grid from `/svg-sprite/picker-search`, which the server
+builds from `SvgSprite.picker_icon_ids`. A theme can't change a server response,
+and hiding icons in the browser breaks the picker's paging: results come 100 at a
+time in alphabetical order and `lucide-*` falls in the middle. So this part:
+
+- **Filters the picker list** to ids starting with `lucide-`, after core's cached
+  list, so a toggle applies on the next request. Only the pickers call
+  `picker_icon_ids` (checked on 2026.10.0).
+- **Leaves rendering alone.** Font Awesome stays in the sprite, because core UI
+  still draws with it wherever the theme hasn't swapped an icon.
+- **Busts the picker cache on toggle** by adding the setting to the picker-search
+  ETag, so browsers refetch the list when it flips.
+
+Checked against the live site on Oct 15 2026 in a throwaway `rails runner`
+process that saved nothing: the picker list went from 3,651 icons to the 1,555
+Lucide ones, "house" still finds `lucide-house`, and turning it off restores the
+original list exactly.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_lucide_icon_pickers_enabled` | on | Off offers Font Awesome again, with no rebuild. Icons already in use don't change either way. |
+
 ## Install
 
 In `containers/app.yml`, under `hooks: after_code:`, next to the existing
@@ -131,6 +163,11 @@ run this plugin's specs against it (CI runs them on every push against core's
   `lib/demon/base.rb`), `MessageBus.last_message` and `publish`'s
   `max_backlog_age` option, and the 30 s production worker timeout behind the
   setting's maximum.
+- Part 11 prepends to `SvgSprite.picker_icon_ids(theme_id, only_available)` and
+  `SvgSpriteController#stale?`. Check that the pickers are still the only caller
+  of `picker_icon_ids` (if core starts rendering from it, the filter would hide
+  Font Awesome icons in the UI) and that `icon_picker_search` still passes its
+  ETag through `stale?`. The specs fail if either signature changes.
 
 ## Development
 
