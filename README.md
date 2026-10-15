@@ -16,7 +16,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | Part | What | Status |
 | -- | -- | -- |
 | 0 | Theme JavaScript compile limit (`AssetProcessor.timeout`), 15 s → configurable | Live, [306-565](https://linear.app/cardwell/issue/306-565) |
-| 1 | Names in message history notices | Planned, [306-535](https://linear.app/cardwell/issue/306-535) |
+| 1 | Names in message history notices | In review, [306-535](https://linear.app/cardwell/issue/306-535) |
 | 2 | Hide paused, revoked and departed members' profiles | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 3 | Visit source for the week-two return metric | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 4 | Event details on topic list rows | Planned, [306-536](https://linear.app/cardwell/issue/306-536) |
@@ -24,9 +24,9 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 6 | A private message's own "no access" page | Planned, [306-538](https://linear.app/cardwell/issue/306-538) |
 | 7 | Directory moderation checks on the server | Planned, [306-528](https://linear.app/cardwell/issue/306-528) |
 | 8 | Message membership facts on the server | Planned, [306-534](https://linear.app/cardwell/issue/306-534) |
-| 8a | Tell the theme when moderators can read a message | Planned, [306-612](https://linear.app/cardwell/issue/306-612) |
+| 8a | Tell the theme when moderators can read a message | Turned down (a theme copy fix instead), [306-612](https://linear.app/cardwell/issue/306-612) |
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
-| 10 | Letter avatars show initials from the name | In review, [306-587](https://linear.app/cardwell/issue/306-587) |
+| 10 | Letter avatars show initials from the name | Live, [306-587](https://linear.app/cardwell/issue/306-587) |
 | 11 | Lucide-only icon pickers | Live, [306-609](https://linear.app/cardwell/issue/306-609) |
 
 The parent issue is [306-533](https://linear.app/cardwell/issue/306-533); the
@@ -95,6 +95,44 @@ skips the channel's latest message between boot and a web worker's respawn (a
 Redis flush by hand, Redis restarted from an older snapshot, a broadcast that
 failed and was logged) leaves that worker on an older value until the next
 change or restart.
+
+### Part 1: names in message history notices
+
+A message keeps a line for each change to who's in it ("Dana Whitfield left this
+message", "Added Pat Lee to this message"). Core stores only the person's handle
+with the notice (the post's `action_code_who` custom field) and builds every line
+from it in the browser, so a text override can't put the name there.
+
+- **Server.** Posts and activity stream rows carry `action_code_who_name` next to
+  the handle. On a topic it's looked up once per page of posts
+  (`TopicView.on_preload`, stored with `set_preloaded_post_data`); a single post
+  looks its one name up. Group notices get the group's display name, only when
+  the viewer may see that group. The composer's "hasn't been seen in a while"
+  response (`/composer_messages/user_not_seen_in_a_while`) carries `names` next
+  to `usernames`. The five codes are `invited_user`, `removed_user`, `user_left`,
+  `invited_group` and `removed_group`.
+- **Browser** (`assets/javascripts`). Three lines core builds from the handle with
+  no hook: the screen-reader heading on each notice, the activity stream line
+  ("invited @dana") and the composer warning. Each override takes core's own
+  output and swaps the handle for the name, so wording, links and dates stay
+  core's. The post field is registered with `addModelField` and the activity
+  names collected with an `addModelCallback("user-action", "init")`, both in a
+  pre-initializer, since `modifyClass` on models is deprecated (2026.8). The
+  composer warning is asked for again once it shows, rather than copying core's
+  long method.
+- **The visible notice** on a message is the theme's own component
+  (`message-detail.gjs`), which reads the same field.
+- **Falls back to the handle** everywhere when there's no name, and every field
+  is additive: the handle stays where core expects it, since links are built from
+  it.
+
+Checked against the live site on Oct 15 2026 in a throwaway `rails runner`: the
+notices on a test message came back named (Elena Brandt added and removed,
+Marcus Oyelaran left), from one lookup for the page.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_message_names_enabled` | on | Off goes back to handles, with no rebuild. |
 
 ### Part 10: initials from the name in letter avatars
 
@@ -222,6 +260,14 @@ run this plugin's specs against it (CI runs them on every push against core's
   `lib/demon/base.rb`), `MessageBus.last_message` and `publish`'s
   `max_backlog_age` option, and the 30 s production worker timeout behind the
   setting's maximum.
+- Part 1 relies on `TopicView.on_preload` and `set_preloaded_post_data`, the
+  `action_code_who` custom field, and `ComposerMessagesController#user_not_seen_in_a_while`
+  returning JSON. In the browser it overrides `a11yHeadingText` on
+  `component:post/small-action`, `description` on
+  `component:post-action-description` and `popup` on
+  `component:composer-messages`, each by swapping `>@handle<` or `@handle` in
+  core's output. Check those names and that core still writes the handle that
+  way; if it doesn't, the lines quietly keep the handle.
 - Part 10 prepends to `User.system_avatar_template(username)` and draws with
   `ImageMagick.magick`, `ImageProcessing::OutputFile.write` and
   `OptimizedImage.resize`, all core internals, and reads Inter from the

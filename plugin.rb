@@ -16,12 +16,47 @@ end
 require_relative "lib/cardwell_community/compile_timeout"
 require_relative "lib/cardwell_community/lucide_icon_pickers"
 require_relative "lib/cardwell_community/initials_avatars"
+require_relative "lib/cardwell_community/message_names"
 
 after_initialize do
   reloadable_patch do
     SvgSprite.singleton_class.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteExtension)
     SvgSpriteController.prepend(CardwellCommunity::LucideIconPickers::SvgSpriteControllerExtension)
     User.singleton_class.prepend(CardwellCommunity::InitialsAvatars::UserExtension)
+    ComposerMessagesController.prepend(
+      CardwellCommunity::MessageNames::ComposerMessagesControllerExtension,
+    )
+  end
+
+  # Part 1: names next to the handles on message notices; see MessageNames.
+  TopicView.on_preload { |topic_view| CardwellCommunity::MessageNames.preload(topic_view) }
+
+  add_to_serializer(
+    :post,
+    :action_code_who_name,
+    include_condition: -> { action_code_who_name.present? },
+  ) do
+    # include_condition calls this too; a post outside a TopicView looks its
+    # name up, so that lookup runs once.
+    next @cardwell_who_name if defined?(@cardwell_who_name)
+    @cardwell_who_name =
+      CardwellCommunity::MessageNames.name_for(
+        object.action_code,
+        post_custom_fields["action_code_who"],
+        scope,
+        topic_view: @topic_view,
+        post_id: object.id,
+      )
+  end
+
+  add_to_serializer(
+    :user_action,
+    :action_code_who_name,
+    include_condition: -> { action_code_who_name.present? },
+  ) do
+    next @cardwell_who_name if defined?(@cardwell_who_name)
+    @cardwell_who_name =
+      CardwellCommunity::MessageNames.name_for(object.action_code, object.action_code_who, scope)
   end
 
   require_relative "lib/cardwell_community/initials_avatars_controller"
