@@ -7,8 +7,10 @@ RSpec.describe CardwellCommunity::LucideIconPickers do
   # next to core's Font Awesome set. Synthetic, no real theme data.
   let(:custom_svgs) do
     {
-      "lucide-house" => '<symbol id="lucide-house" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7"/></symbol>',
-      "lucide-award" => '<symbol id="lucide-award" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/></symbol>',
+      "lucide-house" =>
+        '<symbol id="lucide-house" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7"/></symbol>',
+      "lucide-award" =>
+        '<symbol id="lucide-award" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/></symbol>',
     }
   end
 
@@ -20,9 +22,9 @@ RSpec.describe CardwellCommunity::LucideIconPickers do
   after { SvgSprite.expire_cache }
 
   def picker_ids(keyword = "")
-    SvgSprite
-      .icon_picker_search(keyword, false, page: 0, per_page: 5_000, theme_id: theme.id)[:icons]
-      .map { |icon| icon[:id] }
+    result =
+      SvgSprite.icon_picker_search(keyword, false, page: 0, per_page: 5_000, theme_id: theme.id)
+    result[:icons].map { |icon| icon[:id] }
   end
 
   it "offers only Lucide icons" do
@@ -40,6 +42,11 @@ RSpec.describe CardwellCommunity::LucideIconPickers do
   end
 
   it "restores core's list when the plugin is turned off" do
+    # Turning the plugin off also makes part 0 publish core's compile limit on
+    # its channel. Nothing resets the memory backlog between these specs, so
+    # that message would outlive this example and break part 0's check of the
+    # value published at boot.
+    allow(CardwellCommunity::CompileTimeout).to receive(:broadcast!)
     SiteSetting.cardwell_community_enabled = false
 
     expect(picker_ids).to include("lucide-house", "heart")
