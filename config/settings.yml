@@ -8,3 +8,5 @@ discourse_cardwell_community:
     max: 25
   cardwell_lucide_icon_pickers_enabled:
     default: true
+  cardwell_initials_avatars_enabled:
+    default: true
