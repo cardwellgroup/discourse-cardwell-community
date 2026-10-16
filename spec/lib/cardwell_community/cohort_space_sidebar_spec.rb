@@ -40,7 +40,11 @@ RSpec.describe CardwellCommunity::CohortSpaceSidebar do
     it "doesn't add a space twice" do
       cohort.add(member)
       cohort.remove(member)
-      SidebarSectionLink.create!(user_id: member.id, linkable_type: "Category", linkable_id: space.id)
+      SidebarSectionLink.create!(
+        user_id: member.id,
+        linkable_type: "Category",
+        linkable_id: space.id,
+      )
 
       cohort.add(member)
 
