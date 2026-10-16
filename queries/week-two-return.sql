@@ -11,7 +11,7 @@
 --
 -- :since must be on or after the day cardwell_visit_source_enabled was turned
 -- on. Before that no day has a row, so every visit would look like their own.
--- Staff are left out. One row per month of first visit; the last columns count
+-- Staff are left out. One row per month of first visit. The last columns count
 -- members by what brought them back in week two (a member can count in more
 -- than one).
 
