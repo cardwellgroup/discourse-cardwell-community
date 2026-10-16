@@ -253,6 +253,7 @@ What it doesn't do:
   first. Granting a new group access to an existing space doesn't backfill on
   its own: call `CardwellCommunity::CohortSpaceSidebar.add_for_members([id])`.
 - **Removing an id from the setting** leaves sidebars as they are.
+- **Turning the part back on doesn't catch up.** Joins while it was off (or while the plugin was off) are skipped. After switching it back on, run `CardwellCommunity::CohortSpaceSidebar.add_for_members(CardwellCommunity::CohortSpaceSidebar.space_ids)` once. It isn't automatic, because a catch-up would also re-add spaces members removed from their sidebars.
 - **Staff who leave a cohort group keep its space**, since they can still read
   it through the moderators permission (or as admins).
 - **A staged account that later signs up** doesn't get a space it was granted
