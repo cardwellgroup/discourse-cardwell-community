@@ -13,3 +13,8 @@ discourse_cardwell_community:
   cardwell_message_names_enabled:
     default: true
     client: true
+  cardwell_cohort_space_sidebar_enabled:
+    default: true
+  cardwell_cohort_space_categories:
+    type: category_list
+    default: ""
