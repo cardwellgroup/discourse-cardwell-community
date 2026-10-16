@@ -18,3 +18,5 @@ discourse_cardwell_community:
   cardwell_cohort_space_categories:
     type: category_list
     default: ""
+  cardwell_visit_source_enabled:
+    default: false

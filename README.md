@@ -16,9 +16,9 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | Part | What | Status |
 | -- | -- | -- |
 | 0 | Theme JavaScript compile limit (`AssetProcessor.timeout`), 15 s → configurable | Live, [306-565](https://linear.app/cardwell/issue/306-565) |
-| 1 | Names in message history notices | In review, [306-535](https://linear.app/cardwell/issue/306-535) |
+| 1 | Names in message history notices | Live, [306-535](https://linear.app/cardwell/issue/306-535) |
 | 2 | Hide paused, revoked and departed members' profiles | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
-| 3 | Visit source for the week-two return metric | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
+| 3 | Visit source for the week-two return metric | In review, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 4 | Event details on topic list rows | Planned, [306-536](https://linear.app/cardwell/issue/306-536) |
 | 5 | Activity and notification row details | Planned, [306-537](https://linear.app/cardwell/issue/306-537) |
 | 6 | A private message's own "no access" page | Planned, [306-538](https://linear.app/cardwell/issue/306-538) |
@@ -28,7 +28,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
 | 10 | Letter avatars show initials from the name | Live, [306-587](https://linear.app/cardwell/issue/306-587) |
 | 11 | Lucide-only icon pickers | Live, [306-609](https://linear.app/cardwell/issue/306-609) |
-| 12 | A cohort space appears in its members' sidebars | In review, [306-634](https://linear.app/cardwell/issue/306-634) |
+| 12 | A cohort space appears in its members' sidebars | Live, [306-634](https://linear.app/cardwell/issue/306-634) |
 
 The parent issue is [306-533](https://linear.app/cardwell/issue/306-533); the
 design home is PRD 2, _Platform approach, Cardwell community plugin_. The Linear
@@ -134,6 +134,53 @@ Marcus Oyelaran left), from one lookup for the page.
 | Setting | Default | Notes |
 | -- | -- | -- |
 | `cardwell_message_names_enabled` | on | Off goes back to handles, with no rebuild. |
+
+### Part 3: visit source for the week-two return metric
+
+PRD 3's week-two return counts new members who come back in their second week
+without an email bringing them. Core keeps one `user_visits` row per member per
+day and nothing about how they arrived, so this part tags the links Cardwell
+sends and records where each visit came from.
+
+- **Tagging.** Links back to the community in the activity summary and in
+  notification emails get `?cw_src=digest` or `?cw_src=notification`, added in
+  `before_email_send` after core has made every link absolute, in both the HTML
+  and the plain-text part. Account emails (sign-up, password, email login),
+  unsubscribe links, files and other sites' links stay as they are. Web push
+  links get `?cw_src=push` (a prepend on `PushNotificationPusher.push`). The
+  portal's wave invitations and reminders carry `invite` and `reminder`
+  themselves ([306-615](https://linear.app/cardwell/issue/306-615)).
+- **Recording.** One row per member, day and source in `cardwell_visit_sources`.
+  A page load with a known `cw_src` records that source and redirects to the
+  same address without it, so a link a member copies doesn't carry the tag (a
+  one-minute cookie keeps that clean address from also counting as direct). A
+  page load without one records `direct`. Sign-in, account and email pages,
+  files, the offline page, and fetches the browser marks as not a top-level page
+  (`Sec-Fetch-Dest`, so the service worker's background fetches and iframes)
+  record nothing, and neither does a page opened from a link inside the
+  community, such as a topic opened in a new tab (`Sec-Fetch-Site:
+  same-origin`). The day is the server's UTC date, the same day `user_visits`
+  uses. Deleting an account deletes its rows.
+- **Signed out.** Core keeps the whole address, tag included, through sign-in (a
+  `destination_url` cookie, or the server session once DiscourseConnect is on),
+  so the visit is recorded when the member lands signed in.
+- **What it can't see.** Only full page loads reach the server. Moving around
+  inside the app doesn't, so `direct` means the member opened the community (a
+  new tab, a bookmark, the home screen app, a reload), not every page read. A
+  push tap while the community is already open is routed inside the app by
+  core's service worker and isn't recorded; with no row that day it counts as a
+  visit on their own. Server only, no new JavaScript (Kirk, Oct 16).
+
+The report is [`queries/week-two-return.sql`](queries/week-two-return.sql), a
+Data Explorer query: by month of first visit, how many new members came back in
+days 8 to 14 on their own (a week-two day with a `direct` row, or with no row at
+all) and how many only when Cardwell brought them, by source. Its `since`
+parameter must be on or after the day the setting was turned on, since every
+earlier day has no row.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_visit_source_enabled` | **off** | On tags links and records arrivals. Off sends links untagged and records nothing; rows already recorded stay. |
 
 ### Part 10: initials from the name in letter avatars
 
@@ -316,6 +363,14 @@ run this plugin's specs against it (CI runs them on every push against core's
   `component:composer-messages`, each by swapping `>@handle<` or `@handle` in
   core's output. Check those names and that core still writes the handle that
   way; if it doesn't, the lines quietly keep the handle.
+- Part 3 listens to `before_email_send` (fired in `Email::Sender#send` after the
+  HTML is final), prepends to `PushNotificationPusher.push(user, payload)` and
+  reads `payload[:post_url]`, and adds a `before_action` and an `after_action` to
+  `ApplicationController` that use `spa_boot_request?`. Check the email type
+  names in `VisitSource::NOTIFICATION_EMAILS` against `UserNotifications`, that
+  core still keeps the query string in `destination_url` through sign-in, and
+  that the service worker still opens `payload.url`. A new notification email
+  type goes out untagged until it's added to the list.
 - Part 10 prepends to `User.system_avatar_template(username)` and draws with
   `ImageMagick.magick`, `ImageProcessing::OutputFile.write` and
   `OptimizedImage.resize`, all core internals, and reads Inter from the
