@@ -17,6 +17,7 @@ require_relative "lib/cardwell_community/compile_timeout"
 require_relative "lib/cardwell_community/lucide_icon_pickers"
 require_relative "lib/cardwell_community/initials_avatars"
 require_relative "lib/cardwell_community/message_names"
+require_relative "lib/cardwell_community/cohort_space_sidebar"
 
 after_initialize do
   reloadable_patch do
@@ -57,6 +58,20 @@ after_initialize do
     next @cardwell_who_name if defined?(@cardwell_who_name)
     @cardwell_who_name =
       CardwellCommunity::MessageNames.name_for(object.action_code, object.action_code_who, scope)
+  end
+
+  # Part 12: a cohort space follows its group's membership into the sidebar;
+  # see CohortSpaceSidebar. `on` fires only while the plugin is enabled.
+  on(:user_added_to_group) do |user, group, **_opts|
+    CardwellCommunity::CohortSpaceSidebar.added_to_group(user, group)
+  end
+  on(:user_removed_from_group) do |user, group|
+    CardwellCommunity::CohortSpaceSidebar.removed_from_group(user, group)
+  end
+  on(:site_setting_changed) do |name, old_value, new_value|
+    if name.to_s == "cardwell_cohort_space_categories"
+      CardwellCommunity::CohortSpaceSidebar.setting_changed(old_value, new_value)
+    end
   end
 
   require_relative "lib/cardwell_community/initials_avatars_controller"

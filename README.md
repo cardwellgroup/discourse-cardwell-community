@@ -28,6 +28,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
 | 10 | Letter avatars show initials from the name | Live, [306-587](https://linear.app/cardwell/issue/306-587) |
 | 11 | Lucide-only icon pickers | Live, [306-609](https://linear.app/cardwell/issue/306-609) |
+| 12 | A cohort space appears in its members' sidebars | In review, [306-634](https://linear.app/cardwell/issue/306-634) |
 
 The parent issue is [306-533](https://linear.app/cardwell/issue/306-533); the
 design home is PRD 2, _Platform approach, Cardwell community plugin_. The Linear
@@ -222,6 +223,53 @@ original list exactly.
 | Setting | Default | Notes |
 | -- | -- | -- |
 | `cardwell_lucide_icon_pickers_enabled` | on | Off offers Font Awesome again, with no rebuild. Icons already in use don't change either way. |
+
+### Part 12: cohort spaces in members' sidebars
+
+Each cohort and Thought Leaders segment has a private category, its cohort space,
+readable by that cohort's group. Discourse never adds a new category to anyone's
+sidebar: `default_navigation_menu_categories` is applied when an account is
+created, and every member's account exists before their space does (the sync
+creates the people and the group first, then the space is restricted to the
+group). So this part keeps a space in its members' sidebars:
+
+- **On join** (`user_added_to_group`, however the person is added): every cohort
+  space the group can read goes in their sidebar.
+- **On leave** (`user_removed_from_group`): a space they can no longer see comes
+  out. One they can still see through another group stays.
+- **When a space is added to `cardwell_cohort_space_categories`:** everyone
+  already in its groups gets it, which covers the first members.
+- **Staff stay out.** Only real groups count; Discourse's automatic groups
+  (moderators, staff, admins, trust levels) are skipped, so moderators, who can
+  read every space, don't get every space in their sidebar. A staff member put in
+  a cohort group gets that one space.
+- A member who removes the space from their sidebar keeps it removed until they
+  join a group with access again.
+
+What it doesn't do:
+
+- **Order matters.** The backfill runs when an id is added to the setting, and
+  reads the space's groups at that moment, so set the space's permissions
+  first. Granting a new group access to an existing space doesn't backfill on
+  its own: call `CardwellCommunity::CohortSpaceSidebar.add_for_members([id])`.
+- **Removing an id from the setting** leaves sidebars as they are.
+- **Turning the part back on doesn't catch up.** Joins while it was off (or while the plugin was off) are skipped. After switching it back on, run `CardwellCommunity::CohortSpaceSidebar.add_for_members(CardwellCommunity::CohortSpaceSidebar.space_ids)` once. It isn't automatic, because a catch-up would also re-add spaces members removed from their sidebars.
+- **Staff who leave a cohort group keep its space**, since they can still read
+  it through the moderators permission (or as admins).
+- **A staged account that later signs up** doesn't get a space it was granted
+  while staged; no group event fires on sign-up.
+- It relies on `default_navigation_menu_categories` being set (it is: Ask the
+  Network and From Cardwell). A member with no category links sees core's top
+  categories, and a first link added here would replace that fallback.
+
+The cohort spaces script (306-499, to be added to the theme repo's `tools/`)
+will create each space, set its permissions, and then add its id to the
+setting.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_cohort_space_sidebar_enabled` | on | Off stops adding and removing. Links already in sidebars stay. |
+| `cardwell_cohort_space_categories` | empty | The cohort spaces. Adding one backfills its members' sidebars. |
 
 ## Install
 
