@@ -17,7 +17,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | -- | -- | -- |
 | 0 | Theme JavaScript compile limit (`AssetProcessor.timeout`), 15 s → configurable | Live, [306-565](https://linear.app/cardwell/issue/306-565) |
 | 1 | Names in message history notices | Live, [306-535](https://linear.app/cardwell/issue/306-535) |
-| 2 | Hide paused, revoked and departed members' profiles | Planned, [306-498](https://linear.app/cardwell/issue/306-498) |
+| 2 | Hide paused, revoked and departed members' profiles | In review, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 3 | Visit source for the week-two return metric | In review, [306-498](https://linear.app/cardwell/issue/306-498) |
 | 4 | Event details on topic list rows | Planned, [306-536](https://linear.app/cardwell/issue/306-536) |
 | 5 | Activity and notification row details | Planned, [306-537](https://linear.app/cardwell/issue/306-537) |
@@ -134,6 +134,40 @@ Marcus Oyelaran left), from one lookup for the page.
 | Setting | Default | Notes |
 | -- | -- | -- |
 | `cardwell_message_names_enabled` | on | Off goes back to handles, with no rebuild. |
+
+### Part 2: hiding members who aren't active
+
+A paused or revoked member keeps their account and their posts, but other
+members shouldn't find them. Cardwell Auth's sync keeps every active member in
+one group; this part hides anyone outside it.
+
+- **Profiles.** `Guardian#can_see_profile?` says no, so core answers the profile
+  and the user card with name, username and photo only
+  (`HiddenProfileSerializer`, `profile_hidden: true`), leaves them out of the
+  batch card request (`/user-cards.json`) and refuses their activity, summary and
+  badges. The theme shows that stub as "Inactive member". Each person is looked
+  up once per request, so lists don't repeat the query.
+- **Directory.** Their rows are left out of `/directory_items` for members (a
+  prepend on `DirectoryItemsQuery#exclude_usernames`), which the theme's
+  directory and landing page read. The total counts only who's shown.
+- **Search.** User search skips them (a prepend on `UserSearch#scoped_users`,
+  where every search path starts), so they're out of @mention and message
+  suggestions and the directory's search box, before the result limit. The
+  people in header and full-page search come straight from `User`, so they're
+  checked after core's `Search#user_search` instead.
+- **Never hidden:** anyone looking at their own profile; staff looking at
+  anyone; and admins, moderators, Discourse's bots and the exempt groups as the
+  people being looked at.
+- **Posts stay up under their name.** Only the profile, the card, the directory
+  row and search change.
+
+A member who leaves is anonymized under PRD 4's proposal (pending Cassie), so
+the theme shows "Former member" for them before a card is ever asked for.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_active_member_groups` | empty | The group the sync keeps current. **Empty hides nobody**: it's filled once COL-388 fills the group. |
+| `cardwell_profile_hiding_exempt_groups` | empty | Never hidden. Set to the Cardwell team group. |
 
 ### Part 3: visit source for the week-two return metric
 
@@ -363,6 +397,14 @@ run this plugin's specs against it (CI runs them on every push against core's
   `component:composer-messages`, each by swapping `>@handle<` or `@handle` in
   core's output. Check those names and that core still writes the handle that
   way; if it doesn't, the lines quietly keep the handle.
+- Part 2 prepends to `Guardian#can_see_profile?`, the private
+  `DirectoryItemsQuery#exclude_usernames(items, usernames)` and
+  `UserSearch#scoped_users`, and to the private `Search#user_search`, filtering
+  `@results.users` after it. Check that core still answers a refused profile and
+  card with `HiddenProfileSerializer`, that `exclude_usernames` still runs on
+  every directory query, and that every `UserSearch` path still starts from
+  `scoped_users`. The specs fail if the profile, card, directory or search stop
+  hiding.
 - Part 3 listens to `before_email_send` (fired in `Email::Sender#send` after the
   HTML is final), prepends to `PushNotificationPusher.push(user, payload)` and
   reads `payload[:post_url]`, and adds a `before_action` and an `after_action` to

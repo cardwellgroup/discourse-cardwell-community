@@ -19,6 +19,7 @@ require_relative "lib/cardwell_community/initials_avatars"
 require_relative "lib/cardwell_community/message_names"
 require_relative "lib/cardwell_community/cohort_space_sidebar"
 require_relative "lib/cardwell_community/visit_source"
+require_relative "lib/cardwell_community/profile_hiding"
 
 after_initialize do
   reloadable_patch do
@@ -32,6 +33,10 @@ after_initialize do
       CardwellCommunity::VisitSource::PushNotificationPusherExtension,
     )
     ApplicationController.include(CardwellCommunity::VisitSource::ControllerExtension)
+    Guardian.prepend(CardwellCommunity::ProfileHiding::GuardianExtension)
+    DirectoryItemsQuery.prepend(CardwellCommunity::ProfileHiding::DirectoryItemsQueryExtension)
+    UserSearch.prepend(CardwellCommunity::ProfileHiding::UserSearchExtension)
+    Search.prepend(CardwellCommunity::ProfileHiding::SearchExtension)
   end
 
   # Part 1: names next to the handles on message notices; see MessageNames.

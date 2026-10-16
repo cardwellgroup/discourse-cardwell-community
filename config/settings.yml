@@ -20,3 +20,9 @@ discourse_cardwell_community:
     default: ""
   cardwell_visit_source_enabled:
     default: false
+  cardwell_active_member_groups:
+    type: group_list
+    default: ""
+  cardwell_profile_hiding_exempt_groups:
+    type: group_list
+    default: ""
