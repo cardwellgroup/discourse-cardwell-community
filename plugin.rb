@@ -18,6 +18,7 @@ require_relative "lib/cardwell_community/lucide_icon_pickers"
 require_relative "lib/cardwell_community/initials_avatars"
 require_relative "lib/cardwell_community/message_names"
 require_relative "lib/cardwell_community/cohort_space_sidebar"
+require_relative "lib/cardwell_community/visit_source"
 
 after_initialize do
   reloadable_patch do
@@ -27,6 +28,10 @@ after_initialize do
     ComposerMessagesController.prepend(
       CardwellCommunity::MessageNames::ComposerMessagesControllerExtension,
     )
+    PushNotificationPusher.singleton_class.prepend(
+      CardwellCommunity::VisitSource::PushNotificationPusherExtension,
+    )
+    ApplicationController.include(CardwellCommunity::VisitSource::ControllerExtension)
   end
 
   # Part 1: names next to the handles on message notices; see MessageNames.
@@ -72,6 +77,11 @@ after_initialize do
     if name.to_s == "cardwell_cohort_space_categories"
       CardwellCommunity::CohortSpaceSidebar.setting_changed(old_value, new_value)
     end
+  end
+
+  # Part 3: tag links in summary and notification emails; see VisitSource.
+  on(:before_email_send) do |message, email_type|
+    CardwellCommunity::VisitSource.tag_email(message, email_type)
   end
 
   require_relative "lib/cardwell_community/initials_avatars_controller"
