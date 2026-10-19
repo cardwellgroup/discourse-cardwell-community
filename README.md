@@ -229,6 +229,10 @@ both from the directory request.
   who's shown. Core keeps suspended members in the directory.
 - **Staff** get `cardwell_staff` on every directory row: suspended until, silenced
   until, joined, last seen and days visited.
+- **Checked rows.** Every row the checks ran on carries `cardwell_checked: true`,
+  for everyone. The theme shows members no directory without it (its "couldn't
+  load" alert), so it fails closed if this part isn't deployed, is turned off, or
+  the plugin is.
 - **Silenced members, for staff.** Core drops a silenced member's directory row
   when it refreshes the directory, and keeps it out while the silence end date is
   set, even after it passes. `GET /cardwell/directory/silenced.json` (staff only)
@@ -239,7 +243,7 @@ Paused, revoked and departed members stay part 2's.
 
 | Setting | Default | Notes |
 | -- | -- | -- |
-| `cardwell_directory_checks_enabled` | on | Off goes back to core's directory: members see suspended people, rows carry no staff fields and the silenced list answers 404. The theme's directory needs it on. |
+| `cardwell_directory_checks_enabled` | on | Off goes back to core's directory: rows carry neither `cardwell_checked` nor staff fields, and the silenced list answers 404. The theme's directory needs it on: members then see the "couldn't load" alert, and staff see the list without their details. |
 
 ### Part 10: initials from the name in letter avatars
 

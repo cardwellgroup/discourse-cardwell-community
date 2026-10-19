@@ -98,6 +98,14 @@ after_initialize do
     include_condition: -> { scope.is_staff? && CardwellCommunity::DirectoryChecks.on? },
   ) { CardwellCommunity::DirectoryChecks.staff_fields(object.user, object.user_stat) }
 
+  # Every row the checks ran on says so, for everyone: the theme shows members
+  # no directory without it, so it never lists suspended people by mistake.
+  add_to_serializer(
+    :directory_item,
+    :cardwell_checked,
+    include_condition: -> { CardwellCommunity::DirectoryChecks.on? },
+  ) { true }
+
   # Part 3: tag links in summary and notification emails; see VisitSource.
   on(:before_email_send) do |message, email_type|
     CardwellCommunity::VisitSource.tag_email(message, email_type)

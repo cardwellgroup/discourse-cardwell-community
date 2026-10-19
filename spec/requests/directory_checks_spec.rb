@@ -45,10 +45,12 @@ RSpec.describe "Directory checks (part 7)" do
       expect(response.parsed_body["meta"]["total_rows_directory_items"]).to eq(usernames.size)
     end
 
-    it "gets no staff fields on the rows" do
+    it "gets rows marked as checked, with no staff fields" do
       get "/directory_items.json", params: { period: "all" }
 
-      expect(response.parsed_body["directory_items"].first).not_to have_key("cardwell_staff")
+      row = response.parsed_body["directory_items"].first
+      expect(row["cardwell_checked"]).to eq(true)
+      expect(row).not_to have_key("cardwell_staff")
     end
 
     it "can't read the silenced list" do
@@ -57,12 +59,21 @@ RSpec.describe "Directory checks (part 7)" do
       expect(response.status).to eq(403)
     end
 
-    it "lists suspended people again when the part is off" do
+    it "lists suspended people again, with unmarked rows, when the part is off" do
       SiteSetting.cardwell_directory_checks_enabled = false
 
       get "/directory_items.json", params: { period: "all" }
 
       expect(usernames).to include("zoe_suspended")
+      expect(response.parsed_body["directory_items"].first).not_to have_key("cardwell_checked")
+    end
+
+    it "leaves the rows unmarked when the whole plugin is off" do
+      SiteSetting.cardwell_community_enabled = false
+
+      get "/directory_items.json", params: { period: "all" }
+
+      expect(response.parsed_body["directory_items"].first).not_to have_key("cardwell_checked")
     end
   end
 
