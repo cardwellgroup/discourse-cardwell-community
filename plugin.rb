@@ -84,6 +84,11 @@ after_initialize do
     end
   end
 
+  # Part 2: hidden members out of header and full-page search; see ProfileHiding.
+  register_modifier(:search_user_search) do |users|
+    CardwellCommunity::ProfileHiding.filter_search_users(users)
+  end
+
   # Part 3: tag links in summary and notification emails; see VisitSource.
   on(:before_email_send) do |message, email_type|
     CardwellCommunity::VisitSource.tag_email(message, email_type)

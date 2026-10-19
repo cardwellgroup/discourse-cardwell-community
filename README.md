@@ -153,8 +153,8 @@ one group; this part hides anyone outside it.
 - **Search.** User search skips them (a prepend on `UserSearch#scoped_users`,
   where every search path starts), so they're out of @mention and message
   suggestions and the directory's search box, before the result limit. The
-  people in header and full-page search come straight from `User`, so they're
-  checked after core's `Search#user_search` instead.
+  people in header and full-page search come straight from `User`, so the same
+  rule goes in through core's `search_user_search` modifier, ahead of its limit.
 - **Never hidden:** anyone looking at their own profile; staff looking at
   anyone; and admins, moderators, Discourse's bots and the exempt groups as the
   people being looked at.
@@ -398,13 +398,15 @@ run this plugin's specs against it (CI runs them on every push against core's
   core's output. Check those names and that core still writes the handle that
   way; if it doesn't, the lines quietly keep the handle.
 - Part 2 prepends to `Guardian#can_see_profile?`, the private
-  `DirectoryItemsQuery#exclude_usernames(items, usernames)` and
-  `UserSearch#scoped_users`, and to the private `Search#user_search`, filtering
-  `@results.users` after it. Check that core still answers a refused profile and
-  card with `HiddenProfileSerializer`, that `exclude_usernames` still runs on
-  every directory query, and that every `UserSearch` path still starts from
-  `scoped_users`. The specs fail if the profile, card, directory or search stop
-  hiding.
+  `DirectoryItemsQuery#exclude_usernames(items, usernames)`,
+  `UserSearch#scoped_users` and the private `Search#user_search`, which hands
+  the searcher's guardian to the `search_user_search` modifier. Check that core
+  still answers a refused profile and card with `HiddenProfileSerializer`, that
+  `exclude_usernames` still runs on every directory query, that every
+  `UserSearch` path still starts from `scoped_users`, and that `user_search`
+  still applies `search_user_search` before plucking. If either search hook
+  moves, hidden members show up in search again (nothing breaks), and the specs
+  fail.
 - Part 3 listens to `before_email_send` (fired in `Email::Sender#send` after the
   HTML is final), prepends to `PushNotificationPusher.push(user, payload)` and
   reads `payload[:post_url]`, and adds a `before_action` and an `after_action` to

@@ -105,18 +105,28 @@ module CardwellCommunity
       end
     end
 
+    # Header and full-page search find people straight from User, not through
+    # UserSearch. Core's search_user_search modifier gets that relation before
+    # it runs, so a filter added there lands ahead of the LIMIT; but it gets no
+    # guardian, so SearchExtension hands the searcher's over for the call.
+    def self.with_search_guardian(guardian)
+      previous = Thread.current[:cardwell_search_guardian]
+      Thread.current[:cardwell_search_guardian] = guardian
+      yield
+    ensure
+      Thread.current[:cardwell_search_guardian] = previous
+    end
+
+    def self.filter_search_users(users)
+      guardian = Thread.current[:cardwell_search_guardian]
+      guardian ? filter_users(users, guardian) : users
+    end
+
     module SearchExtension
       private
 
-      # Header and full-page search find people straight from User, not
-      # through UserSearch, and its modifier gets no guardian. So the people
-      # core found are checked one by one afterwards (a few at most).
       def user_search
-        super
-        return if !CardwellCommunity::ProfileHiding.on?
-        return if CardwellCommunity::ProfileHiding.sees_everyone?(@guardian)
-
-        @results.users.select! { |user| @guardian.can_see_profile?(user) }
+        CardwellCommunity::ProfileHiding.with_search_guardian(@guardian) { super }
       end
     end
 

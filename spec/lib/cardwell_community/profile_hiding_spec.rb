@@ -11,6 +11,10 @@ RSpec.describe CardwellCommunity::ProfileHiding do
   fab!(:admin)
 
   before do
+    # Core hides new members' profiles (no posts, low trust) on sites that are
+    # neither invite-only nor approval-required. The community is both, so
+    # that rule never applies there; off here so only this part hides anyone.
+    SiteSetting.hide_new_user_profiles = false
     active_group.add(viewer)
     active_group.add(active)
     team.add(teammate)

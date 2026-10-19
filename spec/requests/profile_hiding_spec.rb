@@ -8,6 +8,10 @@ RSpec.describe "Profile hiding (part 2)" do
   fab!(:moderator)
 
   before do
+    # Core hides new members' profiles (no posts, low trust) on sites that are
+    # neither invite-only nor approval-required. The community is both, so
+    # that rule never applies there; off here so only this part hides anyone.
+    SiteSetting.hide_new_user_profiles = false
     active_group.add(viewer)
     active_group.add(active)
     paused.user_profile.update!(bio_raw: "A bio nobody should see")
@@ -80,6 +84,22 @@ RSpec.describe "Profile hiding (part 2)" do
       expect(usernames).not_to include("zoe_paused")
     end
 
+    it "finds active members in header search even when hidden ones rank first" do
+      SearchIndexer.enable
+      hidden =
+        (1..6).map do |n|
+          Fabricate(:user, username: "zoe_hidden_#{n}", last_posted_at: n.minutes.ago)
+        end
+      active.update!(last_posted_at: 1.year.ago)
+      [active, *hidden].each { |user| SearchIndexer.index(user, force: true) }
+
+      get "/search/query.json", params: { term: "zoe" }
+
+      usernames = response.parsed_body["users"].map { |u| u["username"] }
+      expect(usernames).to include("zoe_active")
+      expect(usernames.grep(/zoe_hidden/)).to be_empty
+    end
+
     it "hides nobody while the active group is empty" do
       SiteSetting.cardwell_active_member_groups = ""
       DirectoryItem.refresh!
@@ -120,6 +140,14 @@ RSpec.describe "Profile hiding (part 2)" do
       get "/u/search/users.json", params: { term: "zoe_" }
       usernames = response.parsed_body["users"].map { |u| u["username"] }
       expect(usernames).to include("zoe_paused")
+
+      SearchIndexer.enable
+      SearchIndexer.index(paused, force: true)
+      get "/search/query.json", params: { term: "zoe" }
+      usernames = response.parsed_body["users"].map { |u| u["username"] }
+      expect(usernames).to include("zoe_paused")
+    ensure
+      SearchIndexer.disable
     end
   end
 end
