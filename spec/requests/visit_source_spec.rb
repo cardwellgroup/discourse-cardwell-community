@@ -135,6 +135,10 @@ RSpec.describe "Visit source (part 3)" do
     end
 
     it "records nothing while the plugin is off" do
+      # Turning the plugin off also makes part 0 publish core's compile limit on
+      # its channel, which would outlive this example and break part 0's check of
+      # the value published at boot.
+      allow(CardwellCommunity::CompileTimeout).to receive(:broadcast!)
       SiteSetting.cardwell_community_enabled = false
 
       get "/latest?cw_src=digest"

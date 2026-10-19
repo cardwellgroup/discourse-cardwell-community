@@ -38,6 +38,10 @@ RSpec.describe CardwellCommunity::ProfileHiding do
   end
 
   it "hides nobody while the plugin is off" do
+    # Turning the plugin off also makes part 0 publish core's compile limit on
+    # its channel, which would outlive this example and break part 0's check of
+    # the value published at boot.
+    allow(CardwellCommunity::CompileTimeout).to receive(:broadcast!)
     SiteSetting.cardwell_community_enabled = false
 
     expect(can_see?(viewer, paused)).to eq(true)

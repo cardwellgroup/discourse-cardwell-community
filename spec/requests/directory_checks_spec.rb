@@ -69,6 +69,10 @@ RSpec.describe "Directory checks (part 7)" do
     end
 
     it "leaves the rows unmarked when the whole plugin is off" do
+      # Turning the plugin off also makes part 0 publish core's compile limit on
+      # its channel, which would outlive this example and break part 0's check of
+      # the value published at boot.
+      allow(CardwellCommunity::CompileTimeout).to receive(:broadcast!)
       SiteSetting.cardwell_community_enabled = false
 
       get "/directory_items.json", params: { period: "all" }
