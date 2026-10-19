@@ -26,3 +26,5 @@ discourse_cardwell_community:
   cardwell_profile_hiding_exempt_groups:
     type: group_list
     default: ""
+  cardwell_directory_checks_enabled:
+    default: true

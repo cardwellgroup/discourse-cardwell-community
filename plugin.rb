@@ -20,6 +20,7 @@ require_relative "lib/cardwell_community/message_names"
 require_relative "lib/cardwell_community/cohort_space_sidebar"
 require_relative "lib/cardwell_community/visit_source"
 require_relative "lib/cardwell_community/profile_hiding"
+require_relative "lib/cardwell_community/directory_checks"
 
 after_initialize do
   reloadable_patch do
@@ -35,6 +36,7 @@ after_initialize do
     ApplicationController.include(CardwellCommunity::VisitSource::ControllerExtension)
     Guardian.prepend(CardwellCommunity::ProfileHiding::GuardianExtension)
     DirectoryItemsQuery.prepend(CardwellCommunity::ProfileHiding::DirectoryItemsQueryExtension)
+    DirectoryItemsQuery.prepend(CardwellCommunity::DirectoryChecks::DirectoryItemsQueryExtension)
     UserSearch.prepend(CardwellCommunity::ProfileHiding::UserSearchExtension)
     Search.prepend(CardwellCommunity::ProfileHiding::SearchExtension)
   end
@@ -89,12 +91,28 @@ after_initialize do
     CardwellCommunity::ProfileHiding.filter_search_users(users)
   end
 
+  # Part 7: moderation state on each directory row, for staff; see DirectoryChecks.
+  add_to_serializer(
+    :directory_item,
+    :cardwell_staff,
+    include_condition: -> { scope.is_staff? && CardwellCommunity::DirectoryChecks.on? },
+  ) { CardwellCommunity::DirectoryChecks.staff_fields(object.user, object.user_stat) }
+
+  # Every row the checks ran on says so, for everyone: the theme shows members
+  # no directory without it, so it never lists suspended people by mistake.
+  add_to_serializer(
+    :directory_item,
+    :cardwell_checked,
+    include_condition: -> { CardwellCommunity::DirectoryChecks.on? },
+  ) { true }
+
   # Part 3: tag links in summary and notification emails; see VisitSource.
   on(:before_email_send) do |message, email_type|
     CardwellCommunity::VisitSource.tag_email(message, email_type)
   end
 
   require_relative "lib/cardwell_community/initials_avatars_controller"
+  require_relative "lib/cardwell_community/directory_silenced_controller"
   CardwellCommunity::InitialsAvatars.cleanup_old
 
   # Under /letter_avatar/ so nginx caches it like core's letter avatars; see
@@ -108,6 +126,7 @@ after_initialize do
           size: /\d+/,
           format: :png,
         }
+    get "cardwell/directory/silenced" => "cardwell_community/directory_silenced#index"
   end
 
   # Apply here and put the database's value on the channel, so that forks

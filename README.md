@@ -22,7 +22,7 @@ pays that cost once. Later parts arrive as pull requests here and deploy from
 | 4 | Event details on topic list rows | Planned, [306-536](https://linear.app/cardwell/issue/306-536) |
 | 5 | Activity and notification row details | Planned, [306-537](https://linear.app/cardwell/issue/306-537) |
 | 6 | A private message's own "no access" page | Planned, [306-538](https://linear.app/cardwell/issue/306-538) |
-| 7 | Directory moderation checks on the server | Planned, [306-528](https://linear.app/cardwell/issue/306-528) |
+| 7 | Directory moderation checks on the server | In review, [306-528](https://linear.app/cardwell/issue/306-528) |
 | 8 | Message membership facts on the server | Planned, [306-534](https://linear.app/cardwell/issue/306-534) |
 | 8a | Tell the theme when moderators can read a message | Turned down (a theme copy fix instead), [306-612](https://linear.app/cardwell/issue/306-612) |
 | 9 | The landing page in one request | Planned, [306-556](https://linear.app/cardwell/issue/306-556) |
@@ -216,6 +216,35 @@ earlier day has no row.
 | -- | -- | -- |
 | `cardwell_visit_source_enabled` | **off** | On tags links and records arrivals. Off sends links untagged and records nothing; rows already recorded stay. |
 
+### Part 7: directory moderation checks on the server
+
+The theme's directory used to check moderation state in the browser. Members
+loaded card details for everyone in the directory, about a second per 50 people,
+to drop anyone suspended, and stayed hidden until those arrived. Staff paged
+through three admin user lists (active, suspended, silenced). This part answers
+both from the directory request.
+
+- **Members** don't get suspended people from `/directory_items` (a prepend on
+  `DirectoryItemsQuery#exclude_usernames`, beside part 2's). The total counts only
+  who's shown. Core keeps suspended members in the directory.
+- **Staff** get `cardwell_staff` on every directory row: suspended until, silenced
+  until, joined, last seen and days visited.
+- **Checked rows.** Every row the checks ran on carries `cardwell_checked: true`,
+  for everyone. The theme shows members no directory without it (its "couldn't
+  load" alert), so it fails closed if this part isn't deployed, is turned off, or
+  the plugin is.
+- **Silenced members, for staff.** Core drops a silenced member's directory row
+  when it refreshes the directory, and keeps it out while the silence end date is
+  set, even after it passes. `GET /cardwell/directory/silenced.json` (staff only)
+  returns those accounts in the directory's row shape, with the same
+  `user_field_ids`, an optional `group`, and `cardwell_staff`.
+
+Paused, revoked and departed members stay part 2's.
+
+| Setting | Default | Notes |
+| -- | -- | -- |
+| `cardwell_directory_checks_enabled` | on | Off goes back to core's directory: rows carry neither `cardwell_checked` nor staff fields, and the silenced list answers 404. The theme's directory needs it on: members then see the "couldn't load" alert, and staff see the list without their details. |
+
 ### Part 10: initials from the name in letter avatars
 
 Someone with no photo gets a letter avatar, and core's letter is the first letter
@@ -407,6 +436,15 @@ run this plugin's specs against it (CI runs them on every push against core's
   still applies `search_user_search` before plucking. If either search hook
   moves, hidden members show up in search again (nothing breaks), and the specs
   fail.
+- Part 7 prepends to the same private `DirectoryItemsQuery#exclude_usernames`
+  as part 2, adds `cardwell_staff` to `DirectoryItemSerializer` (reading the
+  row's `user` and `user_stat`), and builds the silenced list with
+  `DirectoryItemSerializer::UserSerializer` and its `user_custom_field_map` and
+  `searchable_fields` options. Check that core's directory refresh still drops
+  rows by `silenced_till IS NULL`, `active` and `id > 0`
+  (`DirectoryItem.refresh_period!`); if it starts keeping silenced members, staff
+  would see them twice until the theme dedupes them (it does, by id). The specs
+  fail if the serializer or the query hook moves.
 - Part 3 listens to `before_email_send` (fired in `Email::Sender#send` after the
   HTML is final), prepends to `PushNotificationPusher.push(user, payload)` and
   reads `payload[:post_url]`, and adds a `before_action` and an `after_action` to
