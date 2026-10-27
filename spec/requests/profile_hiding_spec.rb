@@ -6,6 +6,24 @@ RSpec.describe "Profile hiding (part 2)" do
   fab!(:active) { Fabricate(:user, username: "zoe_active", name: "Zoe Active") }
   fab!(:paused) { Fabricate(:user, username: "zoe_paused", name: "Zoe Paused") }
   fab!(:moderator)
+  fab!(:state_group) { Fabricate(:group, name: "state-ohio") }
+  fab!(:badge) { Fabricate(:badge, name: "Graduate") }
+
+  # A state group and a badge holding one active and one hidden member, as the
+  # Auth sync and the graduation badge will leave them.
+  def seed_group_and_badge
+    [viewer, active, paused].each { |user| state_group.add(user) }
+    Group.reset_user_count(state_group)
+    [active, paused].each { |user| BadgeGranter.grant(badge, user) }
+  end
+
+  def member_usernames(body)
+    body["members"].map { |m| m["username"] }
+  end
+
+  def grantee_ids(body)
+    body["user_badge_info"]["user_badges"].map { |b| b["user_id"] }
+  end
 
   before do
     # Core hides new members' profiles (no posts, low trust) on sites that are
@@ -103,6 +121,7 @@ RSpec.describe "Profile hiding (part 2)" do
     it "hides nobody while the active group is empty" do
       SiteSetting.cardwell_active_member_groups = ""
       DirectoryItem.refresh!
+      seed_group_and_badge
 
       get "/u/zoe_paused.json"
       expect(response.parsed_body["user"]["profile_hidden"]).not_to eq(true)
@@ -110,6 +129,83 @@ RSpec.describe "Profile hiding (part 2)" do
       get "/directory_items.json", params: { period: "all" }
       usernames = response.parsed_body["directory_items"].map { |i| i["user"]["username"] }
       expect(usernames).to include("zoe_paused")
+
+      get "/groups/state-ohio/members.json"
+      expect(member_usernames(response.parsed_body)).to include("zoe_paused")
+      expect(response.parsed_body["meta"]["total"]).to eq(3)
+
+      get "/groups/state-ohio.json"
+      expect(response.parsed_body["group"]["user_count"]).to eq(3)
+
+      get "/user_badges.json", params: { badge_id: badge.id }
+      expect(grantee_ids(response.parsed_body)).to include(paused.id)
+
+      get "/badges/#{badge.id}.json"
+      expect(response.parsed_body["badge"]["grant_count"]).to eq(2)
+    end
+
+    context "with a group and a badge that include a hidden member" do
+      before { seed_group_and_badge }
+
+      it "leaves them out of the group's member list and its total" do
+        get "/groups/state-ohio/members.json"
+
+        expect(response.status).to eq(200)
+        usernames = member_usernames(response.parsed_body)
+        expect(usernames).to contain_exactly("viewer_member", "zoe_active")
+        expect(response.parsed_body["meta"]["total"]).to eq(2)
+      end
+
+      it "leaves them out of a filtered member list too" do
+        get "/groups/state-ohio/members.json", params: { filter: "zoe" }
+
+        expect(member_usernames(response.parsed_body)).to contain_exactly("zoe_active")
+      end
+
+      it "counts only who is shown, on the group and in the groups list" do
+        get "/groups/state-ohio.json"
+        expect(response.parsed_body["group"]["user_count"]).to eq(2)
+
+        get "/groups.json"
+        listed = response.parsed_body["groups"].find { |g| g["name"] == "state-ohio" }
+        expect(listed["user_count"]).to eq(2)
+      end
+
+      it "leaves them out of the group's owners" do
+        state_group.add_owner(paused)
+
+        get "/groups/state-ohio/members.json"
+
+        expect(response.parsed_body["owners"].map { |o| o["username"] }).to be_empty
+      end
+
+      it "leaves the group unfiltered outside a members request" do
+        expect(state_group.listed_users).to include(paused)
+      end
+
+      it "leaves them out of the badge's list of who has it" do
+        get "/user_badges.json", params: { badge_id: badge.id }
+
+        expect(response.status).to eq(200)
+        expect(grantee_ids(response.parsed_body)).to contain_exactly(active.id)
+      end
+
+      # The badge page loads more until it has listed grant_count rows, so a
+      # raw count here would leave its spinner up for good.
+      it "counts only who is shown, on the badge and in the badges list" do
+        get "/badges/#{badge.id}.json"
+        expect(response.parsed_body["badge"]["grant_count"]).to eq(1)
+
+        get "/badges.json"
+        listed = response.parsed_body["badges"].find { |b| b["id"] == badge.id }
+        expect(listed["grant_count"]).to eq(1)
+      end
+
+      it "refuses the badge's RSS feed of grantees" do
+        get "/badges/#{badge.id}.rss"
+
+        expect(response.status).to eq(404)
+      end
     end
   end
 
@@ -121,6 +217,14 @@ RSpec.describe "Profile hiding (part 2)" do
 
       expect(response.parsed_body["user"]["profile_hidden"]).not_to eq(true)
       expect(response.parsed_body["user"]["bio_raw"]).to eq("A bio nobody should see")
+    end
+
+    it "still lists them in their own group" do
+      seed_group_and_badge
+
+      get "/groups/state-ohio/members.json"
+
+      expect(member_usernames(response.parsed_body)).to include("zoe_paused")
     end
   end
 
@@ -148,6 +252,27 @@ RSpec.describe "Profile hiding (part 2)" do
       expect(usernames).to include("zoe_paused")
     ensure
       SearchIndexer.disable
+    end
+
+    it "shows everyone in groups and badges, with the full counts" do
+      seed_group_and_badge
+
+      get "/groups/state-ohio/members.json"
+      expect(member_usernames(response.parsed_body)).to include("zoe_paused")
+      expect(response.parsed_body["meta"]["total"]).to eq(3)
+
+      get "/groups/state-ohio.json"
+      expect(response.parsed_body["group"]["user_count"]).to eq(3)
+
+      get "/user_badges.json", params: { badge_id: badge.id }
+      expect(grantee_ids(response.parsed_body)).to include(paused.id)
+
+      get "/badges/#{badge.id}.json"
+      expect(response.parsed_body["badge"]["grant_count"]).to eq(2)
+
+      get "/badges/#{badge.id}.rss"
+      expect(response.status).to eq(200)
+      expect(response.body).to include("zoe_paused")
     end
   end
 end

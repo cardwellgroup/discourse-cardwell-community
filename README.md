@@ -155,11 +155,24 @@ one group; this part hides anyone outside it.
   suggestions and the directory's search box, before the result limit. The
   people in header and full-page search come straight from `User`, so the same
   rule goes in through core's `search_user_search` modifier, ahead of its limit.
+- **Groups (306-636).** Group member lists leave them out (`Group#listed_users`,
+  filtered while `GroupsController#members` runs, so the list, the owners and
+  the total agree), and every group's `user_count` drops them, so a group's
+  member count matches what it lists. One grouped query per request covers
+  every group on the page.
+- **Badges (306-636).** A badge's list of who has it leaves them out
+  (`UserBadgesController#scoped_user_badges`), its `grant_count` drops them (the
+  badge page loads more until it has listed `grant_count` rows, so the two must
+  agree), and its RSS feed of grantees answers 404 to anyone whose view is
+  filtered, since core's feed template reads the association directly.
 - **Never hidden:** anyone looking at their own profile; staff looking at
   anyone; and admins, moderators, Discourse's bots and the exempt groups as the
   people being looked at.
 - **Posts stay up under their name.** Only the profile, the card, the directory
-  row and search change.
+  row, search, group lists and counts, and badge grantees change.
+- **Keep core's MCP server off** (`mcp_server_enabled`, off by default). Its
+  `ListGroupMembers` tool lists `group.listed_users` and the raw `user_count`
+  outside any request this part filters.
 
 A member who leaves is anonymized under PRD 4's proposal (pending Cassie), so
 the theme shows "Former member" for them before a card is ever asked for.
@@ -435,7 +448,21 @@ run this plugin's specs against it (CI runs them on every push against core's
   `UserSearch` path still starts from `scoped_users`, and that `user_search`
   still applies `search_user_search` before plucking. If either search hook
   moves, hidden members show up in search again (nothing breaks), and the specs
-  fail.
+  fail. For groups and badges (306-636) it also prepends
+  `GroupsController#members`, `Group#listed_users`,
+  `BasicGroupSerializer#user_count`, `BadgeSerializer#grant_count`,
+  `BadgesController#show` and the private
+  `UserBadgesController#scoped_user_badges`. Check that `members` still takes
+  its list, `owners` and `total` from the one `listed_users` relation, that
+  `user_count` and `grant_count` are still plain generated attributes (a
+  serializer method of the same name in core would bypass the prepend), that
+  `grant_count` still counts `user_badges` rows (the badge page's
+  `badges/show.js` `canLoadMore` compares it with the rows it has listed, so it
+  must stay a row count), that `/badges/:id.rss` still routes to
+  `BadgesController#show` and `badges/show.rss.erb` still lists grantees (if
+  the feed moves to another action, hidden grantees reappear in it), that `UserBadgesController#index`
+  still starts from `scoped_user_badges`, and whether anything new calls
+  `listed_users` outside a request (the MCP tool does today).
 - Part 7 prepends to the same private `DirectoryItemsQuery#exclude_usernames`
   as part 2, adds `cardwell_staff` to `DirectoryItemSerializer` (reading the
   row's `user` and `user_stat`), and builds the silenced list with
