@@ -42,6 +42,7 @@ after_initialize do
     GroupsController.prepend(CardwellCommunity::ProfileHiding::GroupsControllerExtension)
     Group.prepend(CardwellCommunity::ProfileHiding::GroupExtension)
     BasicGroupSerializer.prepend(CardwellCommunity::ProfileHiding::BasicGroupSerializerExtension)
+    ComposerController.prepend(CardwellCommunity::ProfileHiding::ComposerControllerExtension)
     UserBadgesController.prepend(CardwellCommunity::ProfileHiding::UserBadgesControllerExtension)
     BadgeSerializer.prepend(CardwellCommunity::ProfileHiding::BadgeSerializerExtension)
     BadgesController.prepend(CardwellCommunity::ProfileHiding::BadgesControllerExtension)

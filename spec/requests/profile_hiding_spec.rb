@@ -206,6 +206,69 @@ RSpec.describe "Profile hiding (part 2)" do
 
         expect(response.status).to eq(404)
       end
+
+      it "keeps admins and the exempt groups in group lists and counts" do
+        exempt_group = Fabricate(:group, name: "cardwell-team")
+        staffer = Fabricate(:user, username: "zoe_staffer")
+        exempt_group.add(staffer)
+        SiteSetting.cardwell_profile_hiding_exempt_groups = exempt_group.id.to_s
+        admin = Fabricate(:admin, username: "zoe_admin")
+        [staffer, admin].each { |user| state_group.add(user) }
+        Group.reset_user_count(state_group)
+
+        get "/groups/state-ohio/members.json"
+        expect(member_usernames(response.parsed_body)).to include("zoe_staffer", "zoe_admin")
+        expect(member_usernames(response.parsed_body)).not_to include("zoe_paused")
+        expect(response.parsed_body["meta"]["total"]).to eq(4)
+
+        get "/groups/state-ohio.json"
+        expect(response.parsed_body["group"]["user_count"]).to eq(4)
+      end
+
+      # The composer reads groups.user_count directly, so without the
+      # composer prepend it says 3 here while the group page says 2.
+      it "counts only who is shown in the composer's @group mention" do
+        state_group.update!(mentionable_level: Group::ALIAS_LEVELS[:everyone])
+
+        get "/composer/mentions.json", params: { names: ["state-ohio"] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["groups"]).to eq("state-ohio" => { "user_count" => 2 })
+      end
+
+      # A new message to all three members already reaches everyone in the
+      # group the viewer can see. Counting the hidden member on either side
+      # alone would make core warn that some members won't be notified.
+      it "compares like with like when a message already reaches the group" do
+        state_group.update!(mentionable_level: Group::ALIAS_LEVELS[:everyone])
+
+        get "/composer/mentions.json",
+            params: {
+              names: ["state-ohio"],
+              allowed_names: [active.username, paused.username],
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["groups"]).to eq("state-ohio" => { "user_count" => 2 })
+        expect(response.parsed_body["group_reasons"]).to eq({})
+      end
+
+      # Here the hidden member is the only one the message misses. Core would
+      # warn "2 of 3 will be notified", which reveals them; filtered, every
+      # member the viewer can see is already on it, so there is no warning.
+      it "doesn't warn about a hidden member a message misses" do
+        state_group.update!(mentionable_level: Group::ALIAS_LEVELS[:everyone])
+
+        get "/composer/mentions.json",
+            params: {
+              names: ["state-ohio"],
+              allowed_names: [active.username],
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["groups"]).to eq("state-ohio" => { "user_count" => 2 })
+        expect(response.parsed_body["group_reasons"]).to eq({})
+      end
     end
   end
 
@@ -225,6 +288,41 @@ RSpec.describe "Profile hiding (part 2)" do
       get "/groups/state-ohio/members.json"
 
       expect(member_usernames(response.parsed_body)).to include("zoe_paused")
+    end
+
+    context "with another hidden member in the same group and badge" do
+      fab!(:paused_too) { Fabricate(:user, username: "zoe_paused_too") }
+
+      before do
+        seed_group_and_badge
+        state_group.add(paused_too)
+        Group.reset_user_count(state_group)
+        BadgeGranter.grant(badge, paused_too)
+      end
+
+      it "counts themself but not the other hidden member" do
+        get "/groups/state-ohio/members.json"
+        expect(member_usernames(response.parsed_body)).to contain_exactly(
+          "viewer_member",
+          "zoe_active",
+          "zoe_paused",
+        )
+
+        get "/groups/state-ohio.json"
+        expect(response.parsed_body["group"]["user_count"]).to eq(3)
+
+        get "/user_badges.json", params: { badge_id: badge.id }
+        expect(grantee_ids(response.parsed_body)).to contain_exactly(active.id, paused.id)
+
+        get "/badges/#{badge.id}.json"
+        expect(response.parsed_body["badge"]["grant_count"]).to eq(2)
+      end
+
+      it "refuses them the badge's RSS feed too" do
+        get "/badges/#{badge.id}.rss"
+
+        expect(response.status).to eq(404)
+      end
     end
   end
 

@@ -159,7 +159,14 @@ one group; this part hides anyone outside it.
   filtered while `GroupsController#members` runs, so the list, the owners and
   the total agree), and every group's `user_count` drops them, so a group's
   member count matches what it lists. One grouped query per request covers
-  every group on the page.
+  every group on the page. The composer's count for an `@group` mention, and
+  its "everyone was already notified" check on a message, drop them too
+  (`ComposerController#mentions` reads the column directly). In a topic they
+  are still notified, so the composer's "about to notify N people" leaves them
+  out of N; and if they push a group's raw count to
+  `max_users_notified_per_group_mention` (100 by default), core notifies nobody
+  while the composer, seeing the smaller count, doesn't warn. In a message, a hidden member who isn't on it won't be reached and
+  the composer doesn't warn about it, since the warning would reveal them.
 - **Badges (306-636).** A badge's list of who has it leaves them out
   (`UserBadgesController#scoped_user_badges`), its `grant_count` drops them (the
   badge page loads more until it has listed `grant_count` rows, so the two must
@@ -169,10 +176,16 @@ one group; this part hides anyone outside it.
   anyone; and admins, moderators, Discourse's bots and the exempt groups as the
   people being looked at.
 - **Posts stay up under their name.** Only the profile, the card, the directory
-  row, search, group lists and counts, and badge grantees change.
+  row, search, group lists and counts (the composer's `@group` count
+  included), and badge grantees change.
 - **Keep core's MCP server off** (`mcp_server_enabled`, off by default). Its
   `ListGroupMembers` tool lists `group.listed_users` and the raw `user_count`
   outside any request this part filters.
+- **Check chat before turning it on** (`chat_enabled`, off today). Chat's
+  group picker gets the filtered `user_count`, but its own
+  `chat_enabled_user_count` (`Chat::ChatableGroupSerializer`) reads
+  `group.human_users` and still counts hidden members, and `can_chat` limits a
+  group message by it.
 
 A member who leaves is anonymized under PRD 4's proposal (pending Cassie), so
 the theme shows "Former member" for them before a card is ever asked for.
@@ -451,11 +464,17 @@ run this plugin's specs against it (CI runs them on every push against core's
   fail. For groups and badges (306-636) it also prepends
   `GroupsController#members`, `Group#listed_users`,
   `BasicGroupSerializer#user_count`, `BadgeSerializer#grant_count`,
-  `BadgesController#show` and the private
-  `UserBadgesController#scoped_user_badges`. Check that `members` still takes
+  `BadgesController#show`, the private
+  `UserBadgesController#scoped_user_badges`, and the private
+  `ComposerController#groups` and `#already_notified_member_count` (the second
+  restates core's query with the filter added, so compare it with core's on
+  every upgrade). Check that `members` still takes
   its list, `owners` and `total` from the one `listed_users` relation, that
-  `user_count` and `grant_count` are still plain generated attributes (a
-  serializer method of the same name in core would bypass the prepend), that
+  `user_count` and `grant_count` are still read through these serializers (a
+  subclass that defines its own method of that name would skip the prepend;
+  core defining one on these classes would not, since the prepend sits in
+  front of it), that `mentions` still reads `user_count` off the records
+  `groups` returns, that
   `grant_count` still counts `user_badges` rows (the badge page's
   `badges/show.js` `canLoadMore` compares it with the rows it has listed, so it
   must stay a row count), that `/badges/:id.rss` still routes to
