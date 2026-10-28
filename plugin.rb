@@ -39,6 +39,13 @@ after_initialize do
     DirectoryItemsQuery.prepend(CardwellCommunity::DirectoryChecks::DirectoryItemsQueryExtension)
     UserSearch.prepend(CardwellCommunity::ProfileHiding::UserSearchExtension)
     Search.prepend(CardwellCommunity::ProfileHiding::SearchExtension)
+    GroupsController.prepend(CardwellCommunity::ProfileHiding::GroupsControllerExtension)
+    Group.prepend(CardwellCommunity::ProfileHiding::GroupExtension)
+    BasicGroupSerializer.prepend(CardwellCommunity::ProfileHiding::BasicGroupSerializerExtension)
+    ComposerController.prepend(CardwellCommunity::ProfileHiding::ComposerControllerExtension)
+    UserBadgesController.prepend(CardwellCommunity::ProfileHiding::UserBadgesControllerExtension)
+    BadgeSerializer.prepend(CardwellCommunity::ProfileHiding::BadgeSerializerExtension)
+    BadgesController.prepend(CardwellCommunity::ProfileHiding::BadgesControllerExtension)
   end
 
   # Part 1: names next to the handles on message notices; see MessageNames.
@@ -88,7 +95,7 @@ after_initialize do
 
   # Part 2: hidden members out of header and full-page search; see ProfileHiding.
   register_modifier(:search_user_search) do |users|
-    CardwellCommunity::ProfileHiding.filter_search_users(users)
+    CardwellCommunity::ProfileHiding.filter_request_users(users)
   end
 
   # Part 7: moderation state on each directory row, for staff; see DirectoryChecks.

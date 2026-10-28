@@ -16,6 +16,11 @@ module CardwellCommunity
   #   list the theme's directory and landing page read.
   # - Search: user search (the @mention and message pickers, the directory's
   #   search box) and the people in header and full-page search skip them.
+  # - Groups (306-636): group member lists leave them out, and each group's
+  #   member count drops them, so a state group's "12 members" matches the 11
+  #   it lists. The composer's count for an @group mention drops them too.
+  # - Badges (306-636): a badge's list of who has it leaves them out, its
+  #   grant count drops them, and its RSS feed of grantees is refused.
   #
   # Never hidden: anyone viewing their own profile, staff viewing anyone, and
   # admins, moderators, Discourse's own bots and the exempt groups (the
@@ -77,10 +82,45 @@ module CardwellCommunity
       users.where(visible_users_sql(guardian))
     end
 
-    def self.filter_directory(items, guardian)
-      return items if !on? || sees_everyone?(guardian)
+    # Any relation with a user_id column (directory rows, user badges, group
+    # memberships), narrowed to the people the viewer may see. One guard for
+    # all of them, so they can't drift apart.
+    def self.filter_by_user_id(relation, guardian)
+      return relation if !on? || sees_everyone?(guardian)
 
-      items.where(user_id: User.where(visible_users_sql(guardian)).select(:id))
+      relation.where(user_id: User.where(visible_users_sql(guardian)).select(:id))
+    end
+
+    # Hidden members per group, { group_id => count }, for every group at once.
+    # One aggregate per request however many groups a page shows;
+    # GuardianExtension keeps the answer. BasicGroupSerializer is embedded
+    # wherever a group appears (profiles, message participants, search,
+    # invites, chat), so this runs on most member page views. That is cheap at
+    # the community's size; revisit it if group_users grows into the hundreds
+    # of thousands. Hidden people always have a positive id (bots are never
+    # hidden), the same people core's user_count tally counts, so subtracting
+    # this from user_count gives exactly the members a viewer is shown.
+    def self.hidden_group_member_counts(guardian)
+      GroupUser.joins(:user).where("NOT (#{visible_users_sql(guardian)})").group(:group_id).count
+    end
+
+    # Hidden grantees per badge, { badge_id => rows }. badges.grant_count counts
+    # user_badges rows (a badge granted twice counts twice), and the grantee
+    # list returns those same rows, so this counts rows too. BadgeSerializer is
+    # embedded in every user badge (user cards, summaries, badge listings, post
+    # headers), so like the group aggregate this runs once on most member page
+    # views; cheap at the community's size, and worth revisiting on the same
+    # terms if user_badges grows into the hundreds of thousands.
+    def self.hidden_badge_grant_counts(guardian)
+      UserBadge.joins(:user).where("NOT (#{visible_users_sql(guardian)})").group(:badge_id).count
+    end
+
+    # A count with the viewer's hidden people taken out. Unchanged with hiding
+    # off, for staff, and where a serializer has no guardian at all.
+    def self.visible_count(count, guardian, hidden_counts_method, id)
+      return count if count.nil? || guardian.nil? || !on? || sees_everyone?(guardian)
+
+      [count - guardian.public_send(hidden_counts_method).fetch(id, 0), 0].max
     end
 
     module GuardianExtension
@@ -94,6 +134,21 @@ module CardwellCommunity
           @cardwell_profile_visible[user.id] = CardwellCommunity::ProfileHiding.visible?(user, self)
         end
       end
+
+      # The groups and badges pages serialize every row with this one guardian.
+      # The memo assumes the guardian lives one request, as a controller's
+      # does: one kept for a long run (a job looping over users while the Auth
+      # sync moves people) would keep the counts from its first use, so such
+      # code should build a fresh guardian per unit of work.
+      def cardwell_hidden_group_member_counts
+        @cardwell_hidden_group_member_counts ||=
+          CardwellCommunity::ProfileHiding.hidden_group_member_counts(self)
+      end
+
+      def cardwell_hidden_badge_grant_counts
+        @cardwell_hidden_badge_grant_counts ||=
+          CardwellCommunity::ProfileHiding.hidden_badge_grant_counts(self)
+      end
     end
 
     module DirectoryItemsQueryExtension
@@ -101,24 +156,32 @@ module CardwellCommunity
 
       # Runs on every directory request, after core's own exclusions.
       def exclude_usernames(items, usernames)
-        CardwellCommunity::ProfileHiding.filter_directory(super, guardian)
+        CardwellCommunity::ProfileHiding.filter_by_user_id(super, guardian)
       end
     end
 
-    # Header and full-page search find people straight from User, not through
-    # UserSearch. Core's search_user_search modifier gets that relation before
-    # it runs, so a filter added there lands ahead of the LIMIT; but it gets no
-    # guardian, so SearchExtension hands the searcher's over for the call.
-    def self.with_search_guardian(guardian)
-      previous = Thread.current[:cardwell_search_guardian]
-      Thread.current[:cardwell_search_guardian] = guardian
+    # Two lists are built where no guardian reaches. Header and full-page
+    # search find people straight from User, not through UserSearch: core's
+    # search_user_search modifier gets that relation ahead of its LIMIT, but
+    # no guardian. Group member lists come from Group#listed_users, a model
+    # method. So the code that has the guardian (SearchExtension,
+    # GroupsControllerExtension) hands it over for the length of the call, and
+    # the filter reads it back. Outside such a call it is nil and nothing is
+    # filtered. One other core caller of listed_users exists: the MCP server's
+    # ListGroupMembers tool (lib/discourse_mcp/tools/groups.rb), which also
+    # returns the raw user_count. It is NOT filtered, so mcp_server_enabled
+    # must stay off while hiding is on (it is off by default; README, core
+    # hooks).
+    def self.with_request_guardian(guardian)
+      previous = Thread.current[:cardwell_request_guardian]
+      Thread.current[:cardwell_request_guardian] = guardian
       yield
     ensure
-      Thread.current[:cardwell_search_guardian] = previous
+      Thread.current[:cardwell_request_guardian] = previous
     end
 
-    def self.filter_search_users(users)
-      guardian = Thread.current[:cardwell_search_guardian]
+    def self.filter_request_users(users)
+      guardian = Thread.current[:cardwell_request_guardian]
       guardian ? filter_users(users, guardian) : users
     end
 
@@ -126,7 +189,150 @@ module CardwellCommunity
       private
 
       def user_search
-        CardwellCommunity::ProfileHiding.with_search_guardian(@guardian) { super }
+        CardwellCommunity::ProfileHiding.with_request_guardian(@guardian) { super }
+      end
+    end
+
+    # GET /groups/:name/members. The list, the owners and meta.total all come
+    # from group.listed_users, so filtering that one relation keeps the three
+    # in step. The requesters branch reads group.requesters and is reached only
+    # by the group's editors, so it is left alone.
+    module GroupsControllerExtension
+      def members
+        CardwellCommunity::ProfileHiding.with_request_guardian(guardian) { super }
+      end
+    end
+
+    module GroupExtension
+      def listed_users
+        CardwellCommunity::ProfileHiding.filter_request_users(super)
+      end
+    end
+
+    # user_count is the groups.user_count column, which counts hidden members.
+    # Every serializer that shows a group inherits it from here
+    # (GroupShowSerializer, the groups list, chat's ChatableGroupSerializer).
+    # Chat's serializer also adds its own chat_enabled_user_count, read from
+    # group.human_users, which still counts hidden members and drives its
+    # can_chat limit; chat is off, so handle that before turning it on (README,
+    # core hooks). The composer reads the column directly, past this
+    # serializer: see ComposerControllerExtension. Webhook payloads serialize
+    # as the system user, which is staff, so their count is the full one.
+    # /groups.json?order=user_count still sorts by the column, so with hidden
+    # members the order can disagree with the counts.
+    module BasicGroupSerializerExtension
+      def user_count
+        CardwellCommunity::ProfileHiding.visible_count(
+          super,
+          scope,
+          :cardwell_hidden_group_member_counts,
+          object.id,
+        )
+      end
+    end
+
+    # GET /composer/mentions, which the composer calls as a member types an
+    # @group. It reads group.user_count straight off the records `groups`
+    # loads, past BasicGroupSerializer, and for a message compares it with
+    # how many members the message already reaches, to decide whether to warn
+    # that some won't be notified. Both sides drop hidden members here, so the
+    # composer's count matches the group page and the comparison stays like
+    # for like. Two consequences, both deliberate. In a topic, hidden members
+    # are still notified, so the composer's "about to notify N people"
+    # understates N by them. Near the limit that goes further: PostAlerter
+    # skips a group whose raw user_count reaches
+    # max_users_notified_per_group_mention, so hidden members can push a group
+    # over it, then nobody is notified while the composer, seeing the smaller
+    # count, doesn't warn. Whether hidden members should be notified at all is
+    # a policy question, not this part. In a message, a hidden member who
+    # isn't on it won't be reached, and the composer no longer warns about
+    # that: "2 of 3 will be notified" would itself reveal the hidden member.
+    module ComposerControllerExtension
+      private
+
+      # Core memoizes this hash and calls it again for every name, so the
+      # records are adjusted once. They are loaded for this request and never
+      # saved.
+      def groups
+        found = super
+        return found if @cardwell_group_counts_adjusted
+
+        @cardwell_group_counts_adjusted = true
+        found.each_value do |group|
+          group.user_count =
+            CardwellCommunity::ProfileHiding.visible_count(
+              group.user_count,
+              guardian,
+              :cardwell_hidden_group_member_counts,
+              group.id,
+            )
+        end
+        found
+      end
+
+      # Core's own query (composer_controller.rb, the same at 3c0dab4 and
+      # v2026.10.0) with hidden members taken out. It is restated rather than
+      # wrapped because core returns a count, and the filter needs the
+      # relation; the README's core-hook list says to recheck it on upgrades.
+      def already_notified_member_count(group)
+        return super if !CardwellCommunity::ProfileHiding.on?
+
+        notified =
+          GroupUser
+            .where(user_id: topic_allowed_user_ids)
+            .or(
+              GroupUser.where(
+                user_id: GroupUser.where(group_id: topic_allowed_group_ids).select(:user_id),
+              ),
+            )
+            .where(group:)
+        CardwellCommunity::ProfileHiding
+          .filter_by_user_id(notified, guardian)
+          .select(:user_id)
+          .distinct
+          .count
+      end
+    end
+
+    # GET /user_badges.json, every listing of who has which badge (by badge,
+    # badge name, badge ids or type, or all listable badges). With a username
+    # the controller already refuses a hidden profile first.
+    module UserBadgesControllerExtension
+      private
+
+      def scoped_user_badges
+        CardwellCommunity::ProfileHiding.filter_by_user_id(super, guardian)
+      end
+    end
+
+    # grant_count is the badges.grant_count column, which counts hidden
+    # members. The badge page's "load more" runs until it has listed
+    # grant_count rows (badges/show.js canLoadMore), so leaving it raw while
+    # the list is filtered keeps the spinner up and the footer hidden for good.
+    module BadgeSerializerExtension
+      def grant_count
+        CardwellCommunity::ProfileHiding.visible_count(
+          super,
+          scope,
+          :cardwell_hidden_badge_grant_counts,
+          object.id,
+        )
+      end
+    end
+
+    # /badges/:id.rss renders @badge.user_badges straight from the association
+    # in a core view (badges/show.rss.erb), past every filter above. Rather
+    # than override a core template, the feed is refused to anyone whose view
+    # is filtered; staff still get it. The community needs a login, so no
+    # feed reader was using it.
+    module BadgesControllerExtension
+      def show
+        if request.format.rss? && CardwellCommunity::ProfileHiding.on? &&
+             !CardwellCommunity::ProfileHiding.sees_everyone?(guardian)
+          raise Discourse::NotFound
+        end
+
+        super
       end
     end
 
